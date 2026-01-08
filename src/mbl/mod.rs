@@ -45,9 +45,14 @@ const RPMC_PATTERNS: [Pattern; 2] = [
 
 pub fn startup() -> Option<fn(name: &std::path::Path) -> Option<io::Result<CowFile>>> {
     log::info!("Starting, mbl2 version v0.1.12");
-    let mcmaps = find_minecraft_library_manually()
-        .expect("Cannot find libminecraftpe.so in memory maps - device not supported");
-    let addr = find_signatures(&RPMC_PATTERNS, &mcmaps).expect("No signature was found");
+    let Ok(mcmaps) = find_minecraft_library_manually() else {
+        log::error!("Cannot find libminecraftpe.so in memory maps - device not supported");
+        return None;
+    };
+    let Some(addr) = find_signatures(&RPMC_PATTERNS, &mcmaps) else {
+        log::error!("No signature was found");
+        return None;
+    };
     log::info!("Hooking ResourcePackManager constructor");
     unsafe {
         rpm_ctor::hook_address(addr as *mut u8);

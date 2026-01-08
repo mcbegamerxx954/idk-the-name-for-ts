@@ -20,7 +20,10 @@ fn main() {
     log::info!("Starting");
     let backend = match mbl::startup() {
         Some(yay) => yay,
-        None => draco::startup(),
+        None => {
+            log::warn!("Mbl2 start failed, using draco");
+            draco::startup()
+        }
     };
     aasset::BACKEND.set(backend).unwrap();
     // Pattern taken from materialbinloader
