@@ -67,10 +67,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Prepare lib for release
-        run: mv target/${{ matrix.target }}/githubci/libmtbinloader2.so libmtbinloader2_${{ matrix.target }}.so
+        run: mv target/${{ matrix.target }}/githubci/libfuseidk.so libfuseidk_${{ matrix.target }}.so
       - name: Create Release
         uses: mikepenz/action-gh-release@v0.2.0-a03 #softprops/action-gh-release
         with:
           body: ${{steps.github_release.outputs.changelog}}
-          files: libmtbinloader2_${{ matrix.target }}.so
+          files: libfuseidk_${{ matrix.target }}.so
 

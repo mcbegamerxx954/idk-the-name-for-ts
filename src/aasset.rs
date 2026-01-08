@@ -1,21 +1,21 @@
 //use crate::ResourceLocation;
 use libc::{off64_t, off_t};
-use materialbin::{CompiledMaterialDefinition, MinecraftVersion};
-use ndk::asset::Asset;
+use ndk::asset::AssetManager;
 use ndk_sys::{AAsset, AAssetManager};
 use once_cell::sync::Lazy;
-use scroll::Pread;
 use std::{
     borrow::Cow,
     collections::HashMap,
-    error::Error,
-    ffi::{CStr, CString, OsStr},
+    ffi::{CStr, OsStr},
     fs::File,
-    io::{self, Cursor, Read, Seek, SeekFrom},
+    io::{self, Cursor, Read, Seek},
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
+    ptr::NonNull,
     sync::{Mutex, OnceLock},
 };
+
+use crate::mbl::StackString;
 
 pub static BACKEND: OnceLock<fn(name: &Path) -> Option<io::Result<CowFile>>> = OnceLock::new();
 
@@ -25,51 +25,10 @@ pub static BACKEND: OnceLock<fn(name: &Path) -> Option<io::Result<CowFile>>> = O
 struct AAssetPtr(*const ndk_sys::AAsset);
 unsafe impl Send for AAssetPtr {}
 
-// The minecraft version we will use to port shaders to
-static MC_VERSION: OnceLock<Option<MinecraftVersion>> = OnceLock::new();
-
 // The assets we have registrered to remplace data about
 static WANTED_ASSETS: Lazy<Mutex<HashMap<AAssetPtr, CowFile>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-// Im very sorry but its just that AssetManager is so shitty to work with
-// i cant handle how randomly it breaks
-fn get_current_mcver(man: ndk::asset::AssetManager) -> Option<MinecraftVersion> {
-    let mut file = match get_uitext(man) {
-        Some(asset) => asset,
-        None => {
-            log::error!("Shader fixing is disabled as no mc version was found");
-            return None;
-        }
-    };
-    let mut buf = Vec::with_capacity(file.length());
-    if let Err(e) = file.read_to_end(&mut buf) {
-        log::error!("Something is wrong with AssetManager, mc detection failed: {e}");
-        return None;
-    };
-    for version in materialbin::ALL_VERSIONS {
-        if buf
-            .pread_with::<CompiledMaterialDefinition>(0, version)
-            .is_ok()
-        {
-            log::info!("Mc version is {version}");
-            return Some(version);
-        };
-    }
-    None
-}
-
-// Try to open UIText.material.bin to guess mc shader version
-fn get_uitext(man: ndk::asset::AssetManager) -> Option<Asset> {
-    const NEW: &CStr = c"assets/renderer/materials/UIText.material.bin";
-    const OLD: &CStr = c"renderer/materials/UIText.material.bin";
-    for path in [NEW, OLD] {
-        if let Some(asset) = man.open(path) {
-            return Some(asset);
-        }
-    }
-    None
-}
 macro_rules! folder_list {
     ($( apk: $apk_folder:literal -> pack: $pack_folder:expr),
         *,
@@ -98,8 +57,12 @@ pub(crate) unsafe fn open(
     // This is meant to strip the new "asset" folder path so we can be compatible with other versions
     let stripped = match c_path.strip_prefix("assets/") {
         Ok(yay) => yay,
-        Err(e) => c_path,
+        Err(_e) => c_path,
     };
+    let Some(manager_ptr) = NonNull::new(man) else {
+        return aasset;
+    };
+    let manager = AssetManager::from_ptr(manager_ptr);
     // Folder paths to replace and with what
     let replacement_list = folder_list! {
         apk: "gui/dist/hbui/" -> pack: "hbui/",
@@ -124,7 +87,7 @@ pub(crate) unsafe fn open(
             };
             let buffer = if os_filename.as_encoded_bytes().ends_with(b".material.bin") {
                 let buffer = buffer.to_vec().unwrap();
-                match process_material(man, &buffer) {
+                match crate::autofixer::process_material(manager, &buffer) {
                     Some(updated) => CowFile::Buffer(Cursor::new(updated)),
                     None => CowFile::Buffer(Cursor::new(buffer)),
                 }
@@ -162,42 +125,6 @@ fn opt_path_join<'a>(bytes: &'a mut [u8; 128], paths: &[&Path]) -> Cow<'a, Path>
     }
     let osstr = OsStr::from_bytes(&bytes[..len]);
     Cow::Borrowed(Path::new(osstr))
-}
-fn process_material(man: *mut AAssetManager, data: &[u8]) -> Option<Vec<u8>> {
-    let mcver = MC_VERSION.get_or_init(|| {
-        let pointer = match std::ptr::NonNull::new(man) {
-            Some(yay) => yay,
-            None => {
-                log::warn!("AssetManager is null?, preposterous, mc detection failed");
-                return None;
-            }
-        };
-        let manager = unsafe { ndk::asset::AssetManager::from_ptr(pointer) };
-        get_current_mcver(manager)
-    });
-    // just ignore if no mc version was found
-    let mcver = (*mcver)?;
-    for version in materialbin::ALL_VERSIONS {
-        let material: CompiledMaterialDefinition = match data.pread_with(0, version) {
-            Ok(data) => data,
-            Err(e) => {
-                log::trace!("[version] Parsing failed: {e}");
-                continue;
-            }
-        };
-        // Prevent some work
-        if version == mcver {
-            return None;
-        }
-        let mut output = Vec::with_capacity(data.len());
-        if let Err(e) = material.write(&mut output, mcver) {
-            log::trace!("[version] Write error: {e}");
-            return None;
-        }
-        return Some(output);
-    }
-
-    None
 }
 pub(crate) unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_int) -> off64_t {
     let mut wanted_assets = WANTED_ASSETS.lock().unwrap();
@@ -368,25 +295,29 @@ fn seek_facade(offset: i64, whence: libc::c_int, file: &mut CowFile) -> i64 {
     }
 }
 
+macro_rules! match_buffers {
+    ($self:ident, $buf:ident,$func:expr) => {
+        match $self {
+            CowFile::File($buf) => $func,
+            CowFile::Buffer($buf) => $func,
+            CowFile::Cxx($buf) => $func,
+        }
+    };
+}
 // Struct that contains either a file or a buffer to read bytes from
 pub enum CowFile {
     File(File),
     Buffer(Cursor<Vec<u8>>),
+    Cxx(Cursor<StackString>),
 }
 impl Read for CowFile {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            Self::File(file) => file.read(buf),
-            Self::Buffer(cursor) => cursor.read(buf),
-        }
+        match_buffers!(self, sbuf, sbuf.read(buf))
     }
 }
 impl Seek for CowFile {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-        match self {
-            Self::File(file) => file.seek(pos),
-            Self::Buffer(cursor) => cursor.seek(pos),
-        }
+        match_buffers!(self, sbuf, sbuf.seek(pos))
     }
 }
 impl CowFile {
@@ -394,6 +325,7 @@ impl CowFile {
         Ok(match self {
             Self::File(file) => file.metadata()?.len(),
             Self::Buffer(cursor) => cursor.get_ref().len() as _,
+            Self::Cxx(cxxcursor) => cxxcursor.get_ref().as_ref().len() as _,
         })
     }
     fn rem(&mut self) -> Result<u64, io::Error> {
@@ -408,8 +340,8 @@ impl CowFile {
                 vec
             }
             Self::Buffer(cursor) => cursor.get_ref().clone(),
+            Self::Cxx(cursor) => cursor.get_ref().as_ref().to_vec(),
         };
-
         let ptr = vec.as_mut_ptr();
         std::mem::forget(vec);
         Ok(ptr)
@@ -422,6 +354,7 @@ impl CowFile {
                 Ok(buffer)
             }
             Self::Buffer(b) => Ok(b.into_inner()),
+            Self::Cxx(cxx) => Ok(cxx.get_ref().as_ref().to_vec()),
         }
     }
 }

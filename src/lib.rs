@@ -1,16 +1,12 @@
-use std::{ffi::CStr, pin::Pin, sync::OnceLock};
+mod jniopts;
+use std::sync::LockResult;
 mod aasset;
+mod autofixer;
 mod draco;
 mod mbl;
 mod plthook;
 use crate::plthook::replace_plt_functions;
-use bhook::hook_fn;
-use core::mem::transmute;
-use cxx::CxxString;
-use libc::{android_set_abort_message, c_void};
 use plt_rs::DynamicLibrary;
-use proc_maps::MapRange;
-use tinypatscan::Pattern;
 
 // Setup for the log crate
 pub fn setup_logging() {
@@ -61,7 +57,17 @@ pub fn hook_aaset() {
     // Hook all aassetmanager functions
     replace_plt_functions(&dyn_lib, asset_fn_list);
 }
-// Find minecraftpe in dlpi
+pub trait LockResultExt {
+    type Guard;
+    fn ignore_poison(self) -> Self::Guard;
+}
+
+impl<Guard> LockResultExt for LockResult<Guard> {
+    type Guard = Guard;
+    fn ignore_poison(self) -> Guard {
+        self.unwrap_or_else(|e| e.into_inner())
+    }
+}
 fn find_lib<'a>(target_name: &str) -> Option<plt_rs::LoadedLibrary<'a>> {
     let loaded_modules = plt_rs::collect_modules();
     loaded_modules

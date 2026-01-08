@@ -2,19 +2,15 @@ pub mod common;
 pub mod storage;
 pub mod utils;
 use crate::aasset::CowFile;
+use crate::draco::utils::ResourcePath;
 
 use self::storage::{parse_storage_location, StorageLocation};
 use bhook::hook_fn;
-use libc::c_void;
 use libloading::{Library, Symbol};
-use ndk::asset::Asset;
-use plt_rs::{collect_modules, DynamicLibrary};
-use std::collections::HashMap;
-use std::ffi::{CStr, OsStr};
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fs::File;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -109,28 +105,11 @@ unsafe fn special_hook(libname: &str) {
     let lib = Library::new(libname).unwrap();
     let sym: Symbol<IsEduFn> = lib.get(IS_EDU).unwrap();
     let addr = *sym;
-    let result = is_edu_hook::hook_address(addr as *mut u8);
+    let _result = is_edu_hook::hook_address(addr as *mut u8);
 }
 
-static SHADER_PATHS: LazyLock<Mutex<HashMap<PathBuf, PathBuf>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-// Make sure that ub cant happen when unwinding
-// and provide usefull info
-fn safe_setup() {
-    //    platform::setup_logging();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        log::error!("Thread crashed: {}", panic_info);
-    }));
-    let start = std::panic::catch_unwind(|| {
-        startup();
-    });
-    if let Err(e) = start {
-        if let Ok(err) = e.downcast::<String>() {
-            log::error!("Thread crash, error: {err}");
-        }
-    }
-}
+static SHADER_PATHS: LazyLock<Mutex<HashSet<ResourcePath<'static>>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 pub fn startup() -> fn(&Path) -> Option<io::Result<CowFile>> {
     log::info!("Starting up!");
@@ -157,8 +136,10 @@ pub fn startup() -> fn(&Path) -> Option<io::Result<CowFile>> {
 }
 fn draco_callback(path: &Path) -> Option<io::Result<CowFile>> {
     let sus = SHADER_PATHS.lock().unwrap();
-    let filename = sus.get(path)?;
-    let file = match File::open(filename) {
+    let aah = ResourcePath::new_nameless(Cow::Borrowed(path));
+
+    let filename = sus.get(&aah)?;
+    let file = match File::open(filename.path()) {
         Ok(yay) => yay,
         Err(e) => return Some(Err(e)),
     };
