@@ -14,7 +14,22 @@ pub fn setup_logging() {
         android_logger::Config::default().with_max_level(log::LevelFilter::Trace),
     );
 }
+
 #[ctor::ctor]
+fn safe_setup() {
+    std::panic::set_hook(Box::new(move |panic_info| {
+        log::error!("Thread crashed: {}", panic_info);
+    }));
+    let start = std::panic::catch_unwind(|| {
+        main();
+    });
+    if let Err(e) = start {
+        if let Ok(err) = e.downcast::<String>() {
+            log::error!("Thread crash, error: {err}");
+        }
+    }
+}
+
 fn main() {
     setup_logging();
     log::info!("Starting");
