@@ -5,8 +5,9 @@ use materialbin::{
     CompiledMaterialDefinition, MinecraftVersion,
 };
 use memchr::memmem::Finder;
-use ndk_sys::AAssetManager;
+use ndk_sys::{AAssetManager, AAsset_close};
 use scroll::Pread;
+use std::ptr::NonNull;
 use std::{
     //    cmp::Ordering,
     ffi::CStr,
@@ -15,7 +16,6 @@ use std::{
         OnceLock,
     },
 };
-use std::ptr::NonNull;
 
 // The Minecraft version we will use to port shaders to
 static MC_VERSION: OnceLock<Option<MinecraftVersion>> = OnceLock::new();
@@ -245,6 +245,10 @@ impl AssetManager {
         }
         let data = unsafe { std::slice::from_raw_parts(res as *const u8, len) };
         vec.extend_from_slice(data);
+        // We copied the buffer so nothing will happen lmao
+        unsafe {
+            AAsset_close(aasset);
+        }
         Some(vec)
         //        None
     }
