@@ -1,8 +1,8 @@
 //use crate::ResourceLocation;
 use libc::{off64_t, off_t};
-use ndk::asset::AssetManager;
+//use ndk::asset::AssetManager;
 use ndk_sys::{AAsset, AAssetManager};
-use once_cell::sync::Lazy;
+//use once_cell::sync::Lazy;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -12,11 +12,10 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     ptr::NonNull,
-    sync::{Mutex, OnceLock},
+    sync::{LazyLock, Mutex, OnceLock},
 };
 
-use crate::mbl::StackString;
-
+use crate::{autofixer::AssetManager, mbl::StackString};
 pub static BACKEND: OnceLock<fn(name: &Path) -> Option<io::Result<CowFile>>> = OnceLock::new();
 
 // This makes me feel wrong... but all we will do is compare the pointer
@@ -26,8 +25,8 @@ struct AAssetPtr(*const ndk_sys::AAsset);
 unsafe impl Send for AAssetPtr {}
 
 // The assets we have registrered to remplace data about
-static WANTED_ASSETS: Lazy<Mutex<HashMap<AAssetPtr, CowFile>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static WANTED_ASSETS: LazyLock<Mutex<HashMap<AAssetPtr, CowFile>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 macro_rules! folder_list {
     ($( apk: $apk_folder:literal -> pack: $pack_folder:expr),

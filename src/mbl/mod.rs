@@ -152,16 +152,6 @@ fn find_signatures(signatures: &[Pattern], ranges: &[SimpleMapRange]) -> Option<
     None
 }
 
-macro_rules! cast_array {
-    ($($func_name:literal -> $hook:expr),
-        *,
-    ) => {
-        [
-            $(($func_name, $hook as *const u8)),*,
-        ]
-    }
-}
-
 // A resource pack manager object
 pub static PACKM_OBJ: Mutex<Option<ResourcePackManager>> = Mutex::new(None);
 // The resource pack manager load function

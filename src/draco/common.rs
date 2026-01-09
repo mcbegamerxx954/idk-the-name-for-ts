@@ -93,7 +93,9 @@ fn update_global_sp<'guh>(dataman: &'guh mut DataManager) -> Result<(), DataErro
 }
 fn startup_load(dataman: &mut DataManager) {
     log::info!("Trying to load files eagerly");
-    update_global_sp(dataman);
+    if let Err(e) = update_global_sp(dataman) {
+        log::error!("Damn we failed epically: {e}");
+    };
 }
 fn setup_dataman(mc_path: &Path) -> DataManager {
     let mut json_path = mc_path.to_path_buf();

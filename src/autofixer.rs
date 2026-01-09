@@ -5,9 +5,8 @@ use materialbin::{
     CompiledMaterialDefinition, MinecraftVersion,
 };
 use memchr::memmem::Finder;
-use ndk::asset::{Asset, AssetManager};
+use ndk_sys::AAssetManager;
 use scroll::Pread;
-use std::io::Read;
 use std::{
     //    cmp::Ordering,
     ffi::CStr,
@@ -16,24 +15,20 @@ use std::{
         OnceLock,
     },
 };
+use std::ptr::NonNull;
 
 // The Minecraft version we will use to port shaders to
 static MC_VERSION: OnceLock<Option<MinecraftVersion>> = OnceLock::new();
 static MC_IS_1_21_100: AtomicBool = AtomicBool::new(false);
 static MC_IS_1_21_130: AtomicBool = AtomicBool::new(false);
 
-fn get_current_mcver(man: ndk::asset::AssetManager) -> Option<MinecraftVersion> {
-    let mut file = match get_uitext(man) {
+fn get_current_mcver(man: AssetManager) -> Option<MinecraftVersion> {
+    let buf = match get_uitext(man) {
         Some(asset) => asset,
         None => {
             log::error!("Shader fixing is disabled as RenderChunk was not found");
             return None;
         }
-    };
-    let mut buf = Vec::with_capacity(file.length());
-    if let Err(e) = file.read_to_end(&mut buf) {
-        log::error!("Something is wrong with AssetManager, mc detection failed: {e}");
-        return None;
     };
 
     for version in materialbin::ALL_VERSIONS.into_iter().rev() {
@@ -54,17 +49,18 @@ fn get_current_mcver(man: ndk::asset::AssetManager) -> Option<MinecraftVersion> 
     None
 }
 
-// Try to open UIText.material.bin to guess Minecraft shader version
-fn get_uitext(man: ndk::asset::AssetManager) -> Option<Asset> {
+fn get_uitext(manager: AssetManager) -> Option<Vec<u8>> {
+    // const just so its all at compile time only
     const NEW: &CStr = c"assets/renderer/materials/RenderChunk.material.bin";
     const OLD: &CStr = c"renderer/materials/RenderChunk.material.bin";
     for path in [NEW, OLD] {
-        if let Some(asset) = man.open(path) {
+        if let Some(asset) = manager.get_file(path) {
             return Some(asset);
         }
     }
     None
 }
+
 pub fn process_material(man: AssetManager, data: &[u8]) -> Option<Vec<u8>> {
     let mcver = MC_VERSION.get_or_init(|| get_current_mcver(man));
     // Just ignore if no Minecraft version was found
@@ -225,4 +221,34 @@ fn add_bytes_before(codebuf: &mut Vec<u8>, finder: &Finder, replace_with: &[u8])
     };
     let previous = position;
     codebuf.splice(previous..previous, replace_with.iter().cloned());
+}
+// A teensy tiny wrapper over it
+pub struct AssetManager(NonNull<AAssetManager>);
+impl AssetManager {
+    pub fn get_file(&self, filename: &CStr) -> Option<Vec<u8>> {
+        let manager = self.0.as_ptr();
+        let aasset = unsafe {
+            ndk_sys::AAssetManager_open(
+                manager,
+                filename.as_ptr(),
+                ndk_sys::AASSET_MODE_BUFFER as i32,
+            )
+        };
+        if aasset.is_null() {
+            return None;
+        }
+        let len = unsafe { ndk_sys::AAsset_getLength64(aasset) as usize };
+        let mut vec = Vec::with_capacity(len);
+        let res = unsafe { ndk_sys::AAsset_getBuffer(aasset) };
+        if res.is_null() {
+            return None;
+        }
+        let data = unsafe { std::slice::from_raw_parts(res as *const u8, len) };
+        vec.extend_from_slice(data);
+        Some(vec)
+        //        None
+    }
+    pub fn from_ptr(ptr: NonNull<AAssetManager>) -> Self {
+        Self(ptr)
+    }
 }

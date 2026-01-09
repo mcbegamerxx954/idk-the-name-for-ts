@@ -1,3 +1,5 @@
+
+# cargo-features = ["panic-immediate-abort"]
 [package]
 name = "fuseidk"
 version = "0.1.7"
@@ -8,18 +10,17 @@ android_logger = { version = "0.15.0", default-features = false }
 atoi = "2.0.0"
 bhook = { version = "0.1.0", git = "https://github.com/mcbegamerxx954/bhook" }
 bstr = "1.12.1"
-ctor = "0.4.1"
+ctor = { version = "0.6.3", default-features = false, features = ["proc_macro"] }
 cxx = "1.0.128"
 jni = "0.21.1"
 libc = "0.2.159"
-libloading = "0.8.8"
+libloading = "0.9"
 log = "0.4.22"
 materialbin = { git = "https://github.com/mcbegamerxx954/materialbin", version = "0.1.1" }
 memchr = "2.7.6"
-ndk = "0.9.0"
+# ndk = { version = "0.9.0", default-features = false }
 ndk-sys = "0.6.0"
 notify = { version = "8.0.0", features = ["crossbeam-channel"] }
-once_cell = "1.20.2"
 plt-rs = "0.3.0"
 region = "3.0.2"
 scroll = "0.12.0"
@@ -27,14 +28,14 @@ struson = "0.6.0"
 tinypatscan = { git = "https://github.com/mcbegamerxx954/tinypatscan", version = "0.1.1" }
 walkdir = "2.5.0"
 
-[profile.release]
+# [profile.release]
 # This lib gets called from nowhere and so unwinding = crash
-panic = "abort"
+# panic = "abort"
 
 [profile.githubci]
 inherits = "release"
 strip = true
-lto = true 
+lto = "fat"
 codegen-units = 1 
 debug = false
 panic = "abort"
@@ -44,3 +45,5 @@ crate-type = ["cdylib"]
 
 [build-dependencies]
 cc = "1.1.24"
+
+
