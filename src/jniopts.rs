@@ -46,29 +46,27 @@ extern "C" fn JNI_OnLoad(vm: JavaVM, _: c_void) -> jint {
 }
 pub static OPTS: LazyLock<Mutex<Options>> = LazyLock::new(|| Mutex::new(Options::default()));
 extern "C" fn setAutofixVersions(mut env: JNIEnv, _thiz: JObject, versions: JObjectArray) {
-    let sus = env
-        .get_array_length(&versions)
-        .expect("Error while getting array length");
+    if let Err(e) = setAutofixVersions_rel(&mut env, versions) {
+        log::error!("Jni error: {e}");
+        return;
+    }
+}
+fn setAutofixVersions_rel(env: &mut JNIEnv, versions: JObjectArray) -> jni::errors::Result<()> {
+    let length = env.get_array_length(&versions)?;
     let mut rs_versions = Vec::new();
-    for index in 0..sus {
-        let string = env
-            .get_object_array_element(&versions, index)
-            .expect("Error while reading jni array element");
-        let string: JString = string.into();
-        //        if !env.is_instance_of(string, "String")
-        let sus = env
-            .get_string(&string)
-            .expect("Error while getting jni string");
-        rs_versions.push(
-            version_from_string(sus.to_str().expect("Java string isnt utf8"))
-                .expect("Version string didnt match any mtbin format "),
-        );
+    for index in 0..length {
+        let string: JString = env.get_object_array_element(&versions, index)?.into();
+        let sus = env.get_string(&string)?;
+        let utf8_str = sus.to_str().expect("Version string was not utf8");
+        let version = version_from_str(utf8_str).expect("String is not a mtbin version");
+        rs_versions.push(version);
     }
     let mut opts = OPTS.lock().ignore_poison();
     opts.autofixer_versions = rs_versions;
+    Ok(())
 }
 
-fn version_from_string(string: &str) -> Option<MinecraftVersion> {
+fn version_from_str(string: &str) -> Option<MinecraftVersion> {
     let mcversion = match string {
         "v1.18.30" => MinecraftVersion::V1_18_30,
         "v1.19.60" => MinecraftVersion::V1_19_60,
