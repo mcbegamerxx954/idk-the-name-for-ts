@@ -3,6 +3,7 @@ use libc::{off64_t, off_t};
 //use ndk::asset::AssetManager;
 use ndk_sys::{AAsset, AAssetManager};
 //use once_cell::sync::Lazy;
+use crate::{autofixer::AssetManager, mbl::StackString, BackendFn, LockResultExt};
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -14,17 +15,15 @@ use std::{
     ptr::NonNull,
     sync::{LazyLock, Mutex, OnceLock},
 };
-
-use crate::{autofixer::AssetManager, mbl::StackString};
-pub static BACKEND: OnceLock<fn(name: &Path) -> Option<io::Result<CowFile>>> = OnceLock::new();
+pub static BACKEND: OnceLock<BackendFn> = OnceLock::new();
 
 // This makes me feel wrong... but all we will do is compare the pointer
-// and the struct will be used in a mutex so i guess this is safe??
+// and the struct will be used in a mutex so  this is safe??
 #[derive(PartialEq, Eq, Hash)]
 struct AAssetPtr(*const ndk_sys::AAsset);
 unsafe impl Send for AAssetPtr {}
 
-// The assets we have registrered to remplace data about
+// The assets we have registered to replace data about
 static WANTED_ASSETS: LazyLock<Mutex<HashMap<AAssetPtr, CowFile>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -93,13 +92,13 @@ pub(crate) unsafe fn open(
             } else {
                 buffer
             };
-            let mut wanted_lock = WANTED_ASSETS.lock().unwrap();
+            let mut wanted_lock = WANTED_ASSETS.lock().ignore_poison();
             wanted_lock.insert(AAssetPtr(aasset), buffer);
             // we do not clwan cxx string because cxx ceate does that for us
             return aasset;
         }
     }
-    return aasset;
+    aasset
 }
 
 /// Join paths without allocating if possible, or
@@ -126,7 +125,7 @@ fn opt_path_join<'a>(bytes: &'a mut [u8; 128], paths: &[&Path]) -> Cow<'a, Path>
     Cow::Borrowed(Path::new(osstr))
 }
 pub(crate) unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_int) -> off64_t {
-    let mut wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
         None => return ndk_sys::AAsset_seek64(aasset, off, whence),
@@ -135,15 +134,14 @@ pub(crate) unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_i
 }
 
 pub(crate) unsafe fn seek(aasset: *mut AAsset, off: off_t, whence: libc::c_int) -> off_t {
-    let mut wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
         None => return ndk_sys::AAsset_seek(aasset, off, whence),
     };
     // This code can be very deadly on large files,
-    // but since NO replacement should surpass u32 max we should be fine...
-    // i dont even think a mcpack can exceed that
-    seek_facade(off.into(), whence, file) as off_t
+    // But Minecraft does not use this so we are safe 😆😆
+    seek_facade(off, whence, file) as off_t
 }
 
 pub(crate) unsafe fn read(
@@ -151,7 +149,7 @@ pub(crate) unsafe fn read(
     buf: *mut libc::c_void,
     count: libc::size_t,
 ) -> libc::c_int {
-    let mut wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
         None => return ndk_sys::AAsset_read(aasset, buf, count),
@@ -169,7 +167,7 @@ pub(crate) unsafe fn read(
 }
 
 pub(crate) unsafe fn len(aasset: *mut AAsset) -> off_t {
-    let wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get(&AAssetPtr(aasset)) {
         Some(file) => file,
         None => return ndk_sys::AAsset_getLength(aasset),
@@ -178,7 +176,7 @@ pub(crate) unsafe fn len(aasset: *mut AAsset) -> off_t {
 }
 
 pub(crate) unsafe fn len64(aasset: *mut AAsset) -> off64_t {
-    let wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get(&AAssetPtr(aasset)) {
         Some(file) => file,
         None => return ndk_sys::AAsset_getLength64(aasset),
@@ -187,7 +185,7 @@ pub(crate) unsafe fn len64(aasset: *mut AAsset) -> off64_t {
 }
 
 pub(crate) unsafe fn rem(aasset: *mut AAsset) -> off_t {
-    let mut wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
         None => return ndk_sys::AAsset_getRemainingLength(aasset),
@@ -196,7 +194,7 @@ pub(crate) unsafe fn rem(aasset: *mut AAsset) -> off_t {
 }
 
 pub(crate) unsafe fn rem64(aasset: *mut AAsset) -> off64_t {
-    let mut wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
         None => return ndk_sys::AAsset_getRemainingLength64(aasset),
@@ -205,14 +203,14 @@ pub(crate) unsafe fn rem64(aasset: *mut AAsset) -> off64_t {
 }
 
 pub(crate) unsafe fn close(aasset: *mut AAsset) {
-    let mut wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     if wanted_assets.remove(&AAssetPtr(aasset)).is_none() {
         ndk_sys::AAsset_close(aasset);
     }
 }
 
 pub(crate) unsafe fn get_buffer(aasset: *mut AAsset) -> *const libc::c_void {
-    let mut wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
         None => return ndk_sys::AAsset_getBuffer(aasset),
@@ -226,7 +224,7 @@ pub(crate) unsafe fn fd_dummy(
     out_start: *mut off_t,
     out_len: *mut off_t,
 ) -> libc::c_int {
-    let wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     match wanted_assets.get(&AAssetPtr(aasset)) {
         Some(_) => {
             log::error!("WE GOT BUSTED NOOO");
@@ -241,7 +239,7 @@ pub(crate) unsafe fn fd_dummy64(
     out_start: *mut off64_t,
     out_len: *mut off64_t,
 ) -> libc::c_int {
-    let wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     match wanted_assets.get(&AAssetPtr(aasset)) {
         Some(_) => {
             log::error!("WE GOT BUSTED NOOO");
@@ -252,7 +250,7 @@ pub(crate) unsafe fn fd_dummy64(
 }
 
 pub(crate) unsafe fn is_alloc(aasset: *mut AAsset) -> libc::c_int {
-    let wanted_assets = WANTED_ASSETS.lock().unwrap();
+    let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     match wanted_assets.get(&AAssetPtr(aasset)) {
         Some(_) => false as libc::c_int,
         None => ndk_sys::AAsset_isAllocated(aasset),

@@ -3,6 +3,7 @@ pub mod storage;
 pub mod utils;
 use crate::aasset::CowFile;
 use crate::draco::utils::ResourcePath;
+use crate::BackendFn;
 
 use self::storage::{parse_storage_location, StorageLocation};
 use bhook::hook_fn;
@@ -105,13 +106,13 @@ unsafe fn special_hook(libname: &str) {
     let lib = Library::new(libname).unwrap();
     let sym: Symbol<IsEduFn> = lib.get(IS_EDU).unwrap();
     let addr = *sym;
-    let _result = is_edu_hook::hook_address(addr as *mut u8);
+    is_edu_hook::hook_address(addr as *mut u8);
 }
 
 static SHADER_PATHS: LazyLock<Mutex<HashSet<ResourcePath<'static>>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-pub fn startup() -> fn(&Path) -> Option<io::Result<CowFile>> {
+pub fn startup() -> BackendFn {
     log::info!("Starting up!");
     log::info!("Finished hooking..");
     unsafe {

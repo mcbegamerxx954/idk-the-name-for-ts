@@ -8,8 +8,8 @@ use std::{fs, io, sync::Mutex};
 // mod jniopts;
 // mod plthook;
 use crate::mbl::cxx_utils::ResourceLocation;
-use crate::LockResultExt;
 use crate::{aasset::CowFile, mbl::loader::ResourcePackManager};
+use crate::{BackendFn, LockResultExt};
 use bhook::hook_fn;
 use bstr::ByteSlice;
 //use bstr::ByteSlice;
@@ -43,7 +43,7 @@ const RPMC_PATTERNS: [Pattern; 2] = [
     Pattern::from_str("55 41 57 41 56 53 48 83 EC ? 41 89 CF 49 89 D6 48 89 FB 64 48 8B 04 25 28 00 00 00 48 89 44 24 ? 48 8B 7E"),
 ];
 
-pub fn startup() -> Option<fn(name: &std::path::Path) -> Option<io::Result<CowFile>>> {
+pub fn startup() -> Option<BackendFn> {
     log::info!("Starting, mbl2 version v0.1.12");
     let Ok(mcmaps) = find_minecraft_library_manually() else {
         log::error!("Cannot find libminecraftpe.so in memory maps - device not supported");

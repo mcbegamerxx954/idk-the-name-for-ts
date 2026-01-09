@@ -1,13 +1,13 @@
 mod jniopts;
-use std::sync::LockResult;
+use std::{path::Path, sync::LockResult};
 mod aasset;
 mod autofixer;
 mod draco;
 mod mbl;
 mod plthook;
-use crate::plthook::replace_plt_functions;
+use crate::{aasset::CowFile, plthook::replace_plt_functions};
 use plt_rs::DynamicLibrary;
-
+pub type BackendFn = fn(name: &Path) -> Option<std::io::Result<CowFile>>;
 // Setup for the log crate
 pub fn setup_logging() {
     android_logger::init_once(
@@ -82,6 +82,7 @@ pub trait LockResultExt {
 
 impl<Guard> LockResultExt for LockResult<Guard> {
     type Guard = Guard;
+    /// You might ask: what tf is this for, simple, poisoning is useless 99% of the time
     fn ignore_poison(self) -> Guard {
         self.unwrap_or_else(|e| e.into_inner())
     }

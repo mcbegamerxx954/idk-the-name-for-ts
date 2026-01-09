@@ -48,7 +48,6 @@ pub static OPTS: LazyLock<Mutex<Options>> = LazyLock::new(|| Mutex::new(Options:
 extern "C" fn setAutofixVersions(mut env: JNIEnv, _thiz: JObject, versions: JObjectArray) {
     if let Err(e) = setAutofixVersions_rel(&mut env, versions) {
         log::error!("Jni error: {e}");
-        return;
     }
 }
 fn setAutofixVersions_rel(env: &mut JNIEnv, versions: JObjectArray) -> jni::errors::Result<()> {
@@ -57,8 +56,7 @@ fn setAutofixVersions_rel(env: &mut JNIEnv, versions: JObjectArray) -> jni::erro
     for index in 0..length {
         let string: JString = env.get_object_array_element(&versions, index)?.into();
         let sus = env.get_string(&string)?;
-        let utf8_str = sus.to_str().expect("Version string was not utf8");
-        let version = version_from_str(utf8_str).expect("String is not a mtbin version");
+        let version = version_from_str(sus.to_bytes()).expect("String is not a mtbin version");
         rs_versions.push(version);
     }
     let mut opts = OPTS.lock().ignore_poison();
@@ -66,13 +64,13 @@ fn setAutofixVersions_rel(env: &mut JNIEnv, versions: JObjectArray) -> jni::erro
     Ok(())
 }
 
-fn version_from_str(string: &str) -> Option<MinecraftVersion> {
+fn version_from_str(string: &[u8]) -> Option<MinecraftVersion> {
     let mcversion = match string {
-        "v1.18.30" => MinecraftVersion::V1_18_30,
-        "v1.19.60" => MinecraftVersion::V1_19_60,
-        "v1.20.80" => MinecraftVersion::V1_20_80,
-        "v1.21.20" => MinecraftVersion::V1_21_20,
-        "v1.21.110+" => MinecraftVersion::V1_21_110,
+        b"v1.18.30" => MinecraftVersion::V1_18_30,
+        b"v1.19.60" => MinecraftVersion::V1_19_60,
+        b"v1.20.80" => MinecraftVersion::V1_20_80,
+        b"v1.21.20" => MinecraftVersion::V1_21_20,
+        b"v1.21.110+" => MinecraftVersion::V1_21_110,
         _ => return None,
     };
     Some(mcversion)

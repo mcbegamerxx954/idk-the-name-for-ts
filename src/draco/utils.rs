@@ -13,6 +13,14 @@ use std::path::{Path, PathBuf};
 use std::{fmt, fs, io};
 use struson::json_path;
 use struson::reader::{JsonReader, JsonStreamReader, ReaderError, ReaderSettings};
+const JSON_SETTINGS: ReaderSettings = ReaderSettings {
+    allow_comments: true,
+    allow_multiple_top_level: true,
+    allow_trailing_comma: true,
+    track_path: false,
+    max_nesting_depth: Some(5),
+    restrict_number_values: false,
+};
 // use tinyjson::{JsonParseError, JsonParser, JsonValue};
 use walkdir::DirEntry;
 // Keeps track and manages data about the minecraft Resource Pack Structure
@@ -47,7 +55,7 @@ impl Display for PackParseError {
         match self {
             Self::JsonParse(e) => write!(f, "Manifest parsing error {e}"),
             Self::IoError(e) => write!(f, "Io error while reading: {e}"),
-            Self::InvalidManifest => write!(f, "Manifest file is not valid"),
+            Self::InvalidManifest(e) => write!(f, "Manifest file is missing a value: {e}"),
             Self::VersionParse(e) => write!(f, "Failed parsing version: {e}"),
         }
     }
@@ -60,7 +68,7 @@ pub enum PackParseError {
     //    #[error("Io error while reading")]
     IoError(std::io::Error),
     //    #[error("Manifest is not valid")]
-    InvalidManifest,
+    InvalidManifest(&'static str),
     //    #[error("Error while parsing version")]
     VersionParse(std::num::ParseIntError),
 }
@@ -69,9 +77,7 @@ impl ValidPack {
     // than bedrock in terms of json parsing
     fn parse_manifest(pack_path: PathBuf) -> Result<Self, PackParseError> {
         let manifest = File::open(pack_path.join("manifest.json"))?;
-        let mut settings = ReaderSettings::default();
-        settings.allow_comments = true;
-        let mut json = JsonStreamReader::new_custom(manifest, settings);
+        let mut json = JsonStreamReader::new_custom(manifest, JSON_SETTINGS);
         json.seek_to(&json_path!["header"])?;
         json.begin_object()?;
         let mut uuid = None;
@@ -98,14 +104,16 @@ impl ValidPack {
             }
         }
         json.end_object()?;
-        if uuid.is_none() || version.is_none() {
-            return Err(PackParseError::InvalidManifest);
-        }
+        let Some(uuid) = uuid else {
+            return Err(PackParseError::InvalidManifest("uuid"));
+        };
+        let Some(version) = version else {
+            return Err(PackParseError::InvalidManifest("version"));
+        };
         Ok(Self {
-            uuid: uuid.unwrap(),
+            uuid,
             path: pack_path,
-
-            version: version.unwrap(),
+            version,
         })
     }
     pub fn get_pack_files(&self, subpack: Option<String>, set: &mut HashSet<ResourcePath>) {
@@ -127,7 +135,7 @@ fn get_files(path: &Path, file_list: &mut HashSet<ResourcePath>) {
     //    let mut files = HashMap::new();
     for entry in iter {
         let curr_path = entry.into_path();
-        let Some(resource_path) = ResourcePath::new(curr_path, &path) else {
+        let Some(resource_path) = ResourcePath::new(curr_path, path) else {
             continue;
         };
         file_list.insert(resource_path);
@@ -193,9 +201,6 @@ impl<'a> PartialEq for ResourcePath<'a> {
     fn eq(&self, other: &Self) -> bool {
         self.resource_name() == other.resource_name()
     }
-    fn ne(&self, other: &Self) -> bool {
-        self.resource_name() != other.resource_name()
-    }
 }
 impl<'a> Eq for ResourcePath<'a> {}
 //impl Eq for ResourcePath {}
@@ -218,9 +223,7 @@ struct GlobalPack {
 impl GlobalPack {
     fn parse(path: &Path) -> Result<Vec<Self>, DataError> {
         let manifest = File::open(path)?;
-        let mut settings = ReaderSettings::default();
-        settings.allow_comments = true;
-        let mut json = JsonStreamReader::new_custom(manifest, settings);
+        let mut json = JsonStreamReader::new_custom(manifest, JSON_SETTINGS);
         json.begin_array()?;
         let mut global_packs = Vec::new();
         while json.has_next()? {
@@ -313,7 +316,7 @@ impl DataManager {
         // Explanation: we use .rev to reverse the iterator since this way we can avoid
         // some checks
         for pack in global_packs.into_iter().rev() {
-            if let Some(vp) = find_valid_pack(&pack, &packs) {
+            if let Some(vp) = packs.iter().find(|vp| matches_pack(&pack, vp)) {
                 // We pass the hashset directly to avoid useless allocations that get dropped instantly
                 vp.get_pack_files(pack.subpack, &mut final_paths);
             }
@@ -346,18 +349,9 @@ impl DataManager {
         Ok(packs)
     }
 }
-fn find_valid_pack<'a>(
-    global_pack: &GlobalPack,
-    valid_packs: &'a [ValidPack],
-) -> Option<&'a ValidPack> {
-    for valid_pack in valid_packs {
-        if valid_pack.uuid.eq_ignore_ascii_case(&global_pack.pack_id)
-            && valid_pack.version == global_pack.version
-        {
-            return Some(valid_pack);
-        }
-    }
-    None
+fn matches_pack(global_pack: &GlobalPack, valid_pack: &ValidPack) -> bool {
+    valid_pack.uuid.eq_ignore_ascii_case(&global_pack.pack_id)
+        && valid_pack.version == global_pack.version
 }
 
 // This is rare, but can happen

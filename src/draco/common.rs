@@ -76,7 +76,7 @@ pub(crate) fn setup_json_watcher(path: PathBuf) {
         }
     }
 }
-fn update_global_sp<'guh>(dataman: &'guh mut DataManager) -> Result<(), DataError> {
+fn update_global_sp(dataman: &mut DataManager) -> Result<(), DataError> {
     let time = Instant::now();
 
     let mut locked_sp = SHADER_PATHS.lock().unwrap_or_else(|err| err.into_inner()); //        .expect("The shader paths lock should never be poisoned");
