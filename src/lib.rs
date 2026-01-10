@@ -19,6 +19,10 @@ pub fn setup_logging() {
         android_logger::Config::default().with_max_level(log::LevelFilter::Trace),
     );
 }
+#[cfg(all(not(feature = "mbl2"), not(feature = "draco")))]
+compile_error!("Comeon, enable either mbl2 or draco feature, or else this projevt is useless");
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+compile_error!("This project does nto support the target system.");
 
 #[ctor::ctor]
 fn safe_setup() {
