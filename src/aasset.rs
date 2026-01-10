@@ -3,7 +3,11 @@ use libc::{off64_t, off_t};
 //use ndk::asset::AssetManager;
 use ndk_sys::{AAsset, AAssetManager};
 //use once_cell::sync::Lazy;
-use crate::{autofixer::AssetManager, mbl::StackString, BackendFn, LockResultExt};
+#[cfg(feature = "autofixing")]
+use crate::autofixer::AssetManager;
+#[cfg(feature = "mbl2")]
+use crate::mbl::StackString;
+use crate::{BackendFn, LockResultExt};
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -12,9 +16,9 @@ use std::{
     io::{self, Cursor, Read, Seek},
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
-    ptr::NonNull,
     sync::{LazyLock, Mutex, OnceLock},
 };
+
 pub static BACKEND: OnceLock<BackendFn> = OnceLock::new();
 
 // This makes me feel wrong... but all we will do is compare the pointer
@@ -48,6 +52,7 @@ pub(crate) unsafe fn open(
     let os_str = OsStr::from_bytes(raw_cstr);
     let c_path: &Path = Path::new(os_str);
     // Extract filename
+    #[cfg(feature = "autofixing")]
     let Some(os_filename) = c_path.file_name() else {
         log::warn!("Path had no filename: {c_path:?}");
         return aasset;
@@ -57,9 +62,11 @@ pub(crate) unsafe fn open(
         Ok(yay) => yay,
         Err(_e) => c_path,
     };
-    let Some(manager_ptr) = NonNull::new(man) else {
+    #[cfg(feature = "autofixing")]
+    let Some(manager_ptr) = std::ptr::NonNull::new(man) else {
         return aasset;
     };
+    #[cfg(feature = "autofixing")]
     let manager = AssetManager::from_ptr(manager_ptr);
     // Folder paths to replace and with what
     let replacement_list = folder_list! {
@@ -83,6 +90,7 @@ pub(crate) unsafe fn open(
                     return aasset;
                 }
             };
+            #[cfg(feature = "autofixing")]
             let buffer = if os_filename.as_encoded_bytes().ends_with(b".material.bin") {
                 let buffer = buffer.to_vec().unwrap();
                 match crate::autofixer::process_material(manager, &buffer) {
@@ -141,7 +149,7 @@ pub(crate) unsafe fn seek(aasset: *mut AAsset, off: off_t, whence: libc::c_int) 
     };
     // This code can be very deadly on large files,
     // But Minecraft does not use this so we are safe 😆😆
-    seek_facade(off, whence, file) as off_t
+    seek_facade(off.into(), whence, file) as off_t
 }
 
 pub(crate) unsafe fn read(
@@ -297,6 +305,7 @@ macro_rules! match_buffers {
         match $self {
             CowFile::File($buf) => $func,
             CowFile::Buffer($buf) => $func,
+            #[cfg(feature = "mbl2")]
             CowFile::Cxx($buf) => $func,
         }
     };
@@ -305,6 +314,7 @@ macro_rules! match_buffers {
 pub enum CowFile {
     File(File),
     Buffer(Cursor<Vec<u8>>),
+    #[cfg(feature = "mbl2")]
     Cxx(Cursor<StackString>),
 }
 impl Read for CowFile {
@@ -322,6 +332,7 @@ impl CowFile {
         Ok(match self {
             Self::File(file) => file.metadata()?.len(),
             Self::Buffer(cursor) => cursor.get_ref().len() as _,
+            #[cfg(feature = "mbl2")]
             Self::Cxx(cxxcursor) => cxxcursor.get_ref().as_ref().len() as _,
         })
     }
@@ -337,12 +348,14 @@ impl CowFile {
                 vec
             }
             Self::Buffer(cursor) => cursor.get_ref().clone(),
+            #[cfg(feature = "mbl2")]
             Self::Cxx(cursor) => cursor.get_ref().as_ref().to_vec(),
         };
         let ptr = vec.as_mut_ptr();
         std::mem::forget(vec);
         Ok(ptr)
     }
+    #[cfg(feature = "autofixing")]
     fn to_vec(self) -> io::Result<Vec<u8>> {
         match self {
             Self::File(mut f) => {
@@ -351,6 +364,7 @@ impl CowFile {
                 Ok(buffer)
             }
             Self::Buffer(b) => Ok(b.into_inner()),
+            #[cfg(feature = "mbl2")]
             Self::Cxx(cxx) => Ok(cxx.get_ref().as_ref().to_vec()),
         }
     }

@@ -1,13 +1,18 @@
+#[cfg(feature = "jni")]
 mod jniopts;
 use std::{path::Path, sync::LockResult};
 mod aasset;
+#[cfg(feature = "autofixing")]
 mod autofixer;
+#[cfg(feature = "draco")]
 mod draco;
+#[cfg(feature = "mbl2")]
 mod mbl;
 mod plthook;
 use crate::{aasset::CowFile, plthook::replace_plt_functions};
 use plt_rs::DynamicLibrary;
 pub type BackendFn = fn(name: &Path) -> Option<std::io::Result<CowFile>>;
+#[cfg(feature = "logging")]
 // Setup for the log crate
 pub fn setup_logging() {
     android_logger::init_once(
@@ -31,8 +36,10 @@ fn safe_setup() {
 }
 
 fn main() {
+    #[cfg(feature = "logging")]
     setup_logging();
     log::info!("Starting");
+    #[cfg(all(feature = "mbl2", feature = "draco"))]
     let backend = match mbl::startup() {
         Some(yay) => yay,
         None => {
@@ -40,6 +47,10 @@ fn main() {
             draco::startup()
         }
     };
+    #[cfg(all(feature = "mbl2", not(feature = "draco")))]
+    let backend = mbl::startup().unwrap();
+    #[cfg(all(feature = "draco", not(feature = "mbl2")))]
+    let backend = draco::startup();
     aasset::BACKEND.set(backend).unwrap();
     // Pattern taken from materialbinloader
     hook_aaset();

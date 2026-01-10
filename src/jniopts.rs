@@ -1,55 +1,48 @@
 #![allow(non_snake_case)]
+#[cfg(feature = "autofixing")]
+use crate::autofixer::OPTS;
+use crate::LockResultExt;
 use jni::{
     objects::{JObject, JObjectArray, JString},
     sys::{jboolean, jint, JNI_TRUE, JNI_VERSION_1_6},
     JNIEnv, JavaVM, NativeMethod,
 };
-use materialbin::{MinecraftVersion, ALL_VERSIONS};
-use std::{
-    os::raw::c_void,
-    sync::{LazyLock, Mutex},
-};
+#[cfg(feature = "autofixing")]
+use materialbin::MinecraftVersion;
+use std::os::raw::c_void;
 
-use crate::LockResultExt;
-pub struct Options {
-    pub handle_lightmaps: bool,
-    pub handle_texturelods: bool,
-    pub autofixer_versions: Vec<MinecraftVersion>,
-}
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            handle_lightmaps: true,
-            handle_texturelods: true,
-            autofixer_versions: ALL_VERSIONS.to_vec(),
-        }
-    }
-}
 macro_rules! native_method {
     ($name:ident, $sig:literal) => {
         NativeMethod::new(stringify!($name), $sig, $name as *mut c_void)
     };
 }
 #[no_mangle]
-extern "C" fn JNI_OnLoad(vm: JavaVM, _: c_void) -> jint {
-    let mut env = vm.get_env().unwrap();
-    let clazz = env
-        .find_class("io/bambosan/mbloader/launcherUtils/LibBindings")
-        .unwrap();
+extern "C" fn JNI_OnLoad(mut vm: JavaVM, _: c_void) -> jint {
+    if let Err(e) = jni_start(&mut vm) {
+        log::error!("Error in jni_onload: {e}");
+    }
+    JNI_VERSION_1_6
+}
+fn jni_start(vm: &mut JavaVM) -> jni::errors::Result<()> {
+    let mut env = vm.get_env()?;
+    let clazz = env.find_class("io/bambosan/mbloader/launcherUtils/LibBindings")?;
+    #[cfg(feature = "autofixing")]
     let mets = [
         native_method!(setAutofixVersions, "([Ljava/lang/String;)V"),
         native_method!(setLightmapAutofixer, "(Z)V"),
         native_method!(setTextureLodAutofixer, "(Z)V"),
     ];
-    env.register_native_methods(clazz, &mets).unwrap();
-    JNI_VERSION_1_6
+    #[cfg(feature = "autofixing")]
+    env.register_native_methods(clazz, &mets)?;
+    Ok(())
 }
-pub static OPTS: LazyLock<Mutex<Options>> = LazyLock::new(|| Mutex::new(Options::default()));
+#[cfg(feature = "autofixing")]
 extern "C" fn setAutofixVersions(mut env: JNIEnv, _thiz: JObject, versions: JObjectArray) {
     if let Err(e) = setAutofixVersions_rel(&mut env, versions) {
         log::error!("Jni error: {e}");
     }
 }
+#[cfg(feature = "autofixing")]
 fn setAutofixVersions_rel(env: &mut JNIEnv, versions: JObjectArray) -> jni::errors::Result<()> {
     let length = env.get_array_length(&versions)?;
     let mut rs_versions = Vec::new();
@@ -63,7 +56,7 @@ fn setAutofixVersions_rel(env: &mut JNIEnv, versions: JObjectArray) -> jni::erro
     opts.autofixer_versions = rs_versions;
     Ok(())
 }
-
+#[cfg(feature = "autofixing")]
 fn version_from_str(string: &[u8]) -> Option<MinecraftVersion> {
     let mcversion = match string {
         b"v1.18.30" => MinecraftVersion::V1_18_30,
@@ -75,12 +68,12 @@ fn version_from_str(string: &[u8]) -> Option<MinecraftVersion> {
     };
     Some(mcversion)
 }
-#[no_mangle]
+#[cfg(feature = "autofixing")]
 extern "C" fn setLightmapAutofixer(_env: JNIEnv, _thiz: JObject, on: jboolean) {
     let mut opts = OPTS.lock().ignore_poison();
     opts.handle_lightmaps = to_bool(on);
 }
-#[no_mangle]
+#[cfg(feature = "autofixing")]
 extern "C" fn setTextureLodAutofixer(_env: JNIEnv, _thiz: JObject, on: jboolean) {
     let mut opts = OPTS.lock().ignore_poison();
     opts.handle_texturelods = to_bool(on);

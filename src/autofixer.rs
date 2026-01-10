@@ -1,4 +1,4 @@
-use crate::{jniopts::OPTS, LockResultExt};
+use crate::LockResultExt;
 use materialbin::{
     bgfx_shader::BgfxShader,
     pass::{ShaderCodePlatform, ShaderStage},
@@ -7,7 +7,6 @@ use materialbin::{
 use memchr::memmem::Finder;
 use ndk_sys::{AAssetManager, AAsset_close};
 use scroll::Pread;
-use std::ptr::NonNull;
 use std::{
     //    cmp::Ordering,
     ffi::CStr,
@@ -15,6 +14,10 @@ use std::{
         atomic::{AtomicBool, Ordering},
         OnceLock,
     },
+};
+use std::{
+    ptr::NonNull,
+    sync::{LazyLock, Mutex},
 };
 
 // The Minecraft version we will use to port shaders to
@@ -256,3 +259,18 @@ impl AssetManager {
         Self(ptr)
     }
 }
+pub struct Options {
+    pub handle_lightmaps: bool,
+    pub handle_texturelods: bool,
+    pub autofixer_versions: Vec<MinecraftVersion>,
+}
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            handle_lightmaps: true,
+            handle_texturelods: true,
+            autofixer_versions: materialbin::ALL_VERSIONS.to_vec(),
+        }
+    }
+}
+pub static OPTS: LazyLock<Mutex<Options>> = LazyLock::new(|| Mutex::new(Options::default()));
