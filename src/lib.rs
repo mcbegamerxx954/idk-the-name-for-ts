@@ -11,6 +11,7 @@ mod mbl;
 mod plthook;
 use crate::{aasset::CowFile, plthook::replace_plt_functions};
 use plt_rs::DynamicLibrary;
+
 pub type BackendFn = fn(name: &Path) -> Option<std::io::Result<CowFile>>;
 #[cfg(feature = "logging")]
 // Setup for the log crate
@@ -24,7 +25,8 @@ compile_error!("Comeon, enable either mbl2 or draco feature, or else this projev
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 compile_error!("This project does nto support the target system.");
 
-#[ctor::ctor]
+ctor::declarative::ctor! {
+    #[ctor]
 fn safe_setup() {
     std::panic::set_hook(Box::new(move |panic_info| {
         log::error!("Thread crashed: {}", panic_info);
@@ -37,6 +39,7 @@ fn safe_setup() {
             log::error!("Thread crash, error: {err}");
         }
     }
+}
 }
 
 fn main() {
