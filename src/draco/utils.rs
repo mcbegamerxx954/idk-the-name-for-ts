@@ -82,7 +82,7 @@ impl ValidPack {
         json.begin_object()?;
         let mut uuid = None;
         let mut version = None;
-        loop {
+        while json.has_next()? {
             match json.next_name()? {
                 "uuid" => uuid = Some(json.next_string()?),
                 "version" => {
@@ -99,17 +99,10 @@ impl ValidPack {
                     json.skip_value()?;
                 }
             }
-            if !json.has_next()? {
-                break;
-            }
         }
         json.end_object()?;
-        let Some(uuid) = uuid else {
-            return Err(PackParseError::InvalidManifest("uuid"));
-        };
-        let Some(version) = version else {
-            return Err(PackParseError::InvalidManifest("version"));
-        };
+        let uuid = uuid.ok_or(PackParseError::InvalidManifest("uuid"))?;
+        let version = version.ok_or(PackParseError::InvalidManifest("version"))?;
         Ok(Self {
             uuid,
             path: pack_path,
@@ -132,7 +125,6 @@ impl ValidPack {
 fn get_files(path: &Path, file_list: &mut HashSet<ResourcePath>) {
     let walker = walkdir::WalkDir::new(path);
     let iter = walker.into_iter().filter_entry(is_interesting).flatten();
-    //    let mut files = HashMap::new();
     for entry in iter {
         let curr_path = entry.into_path();
         let Some(resource_path) = ResourcePath::new(curr_path, path) else {
@@ -257,13 +249,8 @@ impl GlobalPack {
                 }
             }
         }
-
-        let Some(pack_id) = pack_id else {
-            return Err(DataError::InvalidData("id"));
-        };
-        let Some(version) = version else {
-            return Err(DataError::InvalidData("version"));
-        };
+        let pack_id = pack_id.ok_or(DataError::InvalidData("id"))?;
+        let version = version.ok_or(DataError::InvalidData("version"))?;
         Ok(Self {
             pack_id,
             subpack,

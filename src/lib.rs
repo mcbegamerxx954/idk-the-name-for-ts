@@ -105,6 +105,15 @@ impl<Guard> LockResultExt for LockResult<Guard> {
         self.unwrap_or_else(|e| e.into_inner())
     }
 }
+#[macro_export]
+macro_rules! unwrap_or_ret {
+    ($val:expr,($err:ident) $handle:expr) => {
+        match $val {
+            Ok(val) => val,
+            Err($err) $handle
+        }
+    };
+}
 fn find_lib<'a>(target_name: &str) -> Option<plt_rs::LoadedLibrary<'a>> {
     let loaded_modules = plt_rs::collect_modules();
     loaded_modules

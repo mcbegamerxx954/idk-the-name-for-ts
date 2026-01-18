@@ -82,10 +82,15 @@ pub(crate) unsafe fn open(
                 return aasset;
             };
             let mut sus = [0; 128];
-            let buffer = match backend(
-                opt_path_join(&mut sus, &[Path::new(replacement.1), file]).as_ref(),
-            ) {
-                Some(yay) => yay.unwrap(),
+            let joined_path = opt_path_join(&mut sus, &[Path::new(replacement.1), file]);
+            let buffer = match backend(joined_path.as_ref()) {
+                Some(yay) => match yay {
+                    Ok(yay) => yay,
+                    Err(e) => {
+                        log::error!("fuck: {e}");
+                        return aasset;
+                    }
+                },
                 None => {
                     return aasset;
                 }

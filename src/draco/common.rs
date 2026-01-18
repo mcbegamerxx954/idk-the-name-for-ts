@@ -1,3 +1,5 @@
+use crate::LockResultExt;
+
 use super::storage::StorageLocation;
 use super::utils::{DataError, DataManager};
 use super::SHADER_PATHS;
@@ -14,6 +16,7 @@ pub(crate) fn setup_json_watcher(path: PathBuf) {
     };
     let path = get_storage_path(current_location);
     let mut data_manager = setup_dataman(&path);
+    // TODO: Rewrite this shit
     if !data_manager.active_packs_path.exists() {
         data_manager.active_packs_path =
             setup_dataman(&get_storage_path(StorageLocation::Internal)).active_packs_path;
@@ -79,7 +82,7 @@ pub(crate) fn setup_json_watcher(path: PathBuf) {
 fn update_global_sp(dataman: &mut DataManager) -> Result<(), DataError> {
     let time = Instant::now();
 
-    let mut locked_sp = SHADER_PATHS.lock().unwrap_or_else(|err| err.into_inner()); //        .expect("The shader paths lock should never be poisoned");
+    let mut locked_sp = SHADER_PATHS.lock().ignore_poison();
     let data = dataman.shader_paths()?;
     // drop(dataman);
     //

@@ -3,78 +3,83 @@ pub mod storage;
 pub mod utils;
 use crate::aasset::CowFile;
 use crate::draco::utils::ResourcePath;
-use crate::BackendFn;
+use crate::{BackendFn, LockResultExt};
 
 use self::storage::{parse_storage_location, StorageLocation};
 use bhook::hook_fn;
+use jni::errors::Result as JniResult;
+use jni::objects::JObject;
+use jni::JNIEnv;
 use libloading::{Library, Symbol};
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::error::Error;
 use std::fs::File;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use std::{fs, io};
-
 #[derive(Debug)]
 struct JniPaths {
     internal_path: String,
     external_path: String,
 }
-type IsEduFn = unsafe extern "C" fn(jni::JNIEnv, jni::objects::JObject);
+type IsEduFn = unsafe extern "C" fn(JNIEnv, JObject);
 static JNI_PATHS: OnceLock<JniPaths> = OnceLock::new();
 
 hook_fn! {
     fn is_edu_hook(env: jni::JNIEnv, thiz: jni::objects::JObject) ->() = {
         let mut env = env;
-
-        let external_path = super::get_string_from_fn(&mut env, &thiz, "getExternalStoragePath");
-        let internal_path = super::get_string_from_fn(&mut env, &thiz, "getInternalStoragePath");
-        let paths = super::JniPaths {
-            internal_path,
-            external_path,
-        };
-        super::JNI_PATHS.set(paths).unwrap();
-        call_original(env, thiz)
+        if let Err(err) =  super::is_edu_hk(&mut env, &thiz) {
+            log::error!("Getting jni paths failed, draco will not work: {err}");
+        }
+        call_original(env, thiz);
+        self_disable();
     }
 }
-fn get_string_from_fn(
+pub fn is_edu_hk(env: &mut JNIEnv, thiz: &JObject) -> Result<(), Box<dyn Error>> {
+    let external_path = get_jni_path(env, &thiz, "getExternalStoragePath")?;
+    let internal_path = get_jni_path(env, &thiz, "getInternalStoragePath")?;
+    let paths = JniPaths {
+        internal_path,
+        external_path,
+    };
+    JNI_PATHS
+        .set(paths)
+        .map_err(|_| "Jni paths was already set!")?;
+    Ok(())
+}
+fn get_jni_path(
     env: &mut jni::JNIEnv,
     instance: &jni::objects::JObject,
     fn_name: &str,
-) -> String {
+) -> JniResult<String> {
     let jstring = env
-        .call_method(instance, fn_name, "()Ljava/lang/String;", &[])
-        .unwrap()
-        .l()
-        .unwrap();
-    let path_str = env.get_string(jstring.as_ref().into()).unwrap();
-    path_str.to_str().unwrap().to_owned()
+        .call_method(instance, fn_name, "()Ljava/lang/String;", &[])?
+        .l()?;
+    let path_str = env.get_string(jstring.as_ref().into())?;
+    Ok(path_str.to_str().unwrap().to_owned())
 }
 pub fn get_storage_location(options_path: &Path) -> Option<StorageLocation> {
-    let int = match parse_storage_location(options_path) {
-        Ok(location) => location,
-        Err(e) => {
-            log::info!("Cant parse storage: {e}");
-            return None;
-        }
-    };
+    let int = parse_storage_location(options_path)
+        .inspect_err(|e| log::error!("Cant parse storage: {e}"))
+        .ok()?;
     StorageLocation::from_i8(int)
 }
 
 // Get the full path for a storage location
 pub fn get_storage_path(location: StorageLocation) -> std::path::PathBuf {
+    let paths: &JniPaths;
     loop {
-        if JNI_PATHS.get().is_some() {
+        if let Some(jni_paths) = JNI_PATHS.get() {
+            paths = jni_paths;
             break;
         } else {
             log::warn!("we going slwepy time");
             std::thread::sleep(Duration::from_millis(500));
         }
     }
-
-    let paths = JNI_PATHS.get().unwrap();
     let result = match location {
         StorageLocation::Internal => paths.internal_path.to_owned(),
         StorageLocation::External => paths.external_path.to_owned(),
@@ -100,7 +105,7 @@ pub fn get_path() -> std::path::PathBuf {
 //     }
 //     libc::fopen(filename, mode)
 // }
-// Backup of function ptr and its instructions
+
 unsafe fn special_hook(libname: &str) {
     const IS_EDU: &[u8] = b"Java_com_mojang_minecraftpe_MainActivity_isEduMode\0";
     let lib = Library::new(libname).unwrap();
@@ -136,7 +141,7 @@ pub fn startup() -> BackendFn {
     draco_callback
 }
 fn draco_callback(path: &Path) -> Option<io::Result<CowFile>> {
-    let sus = SHADER_PATHS.lock().unwrap();
+    let sus = SHADER_PATHS.lock().ignore_poison();
     let aah = ResourcePath::new_nameless(Cow::Borrowed(path));
 
     let filename = sus.get(&aah)?;
