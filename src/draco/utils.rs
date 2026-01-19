@@ -238,12 +238,9 @@ impl DataManager {
             if !dir.file_type()?.is_dir() {
                 continue;
             }
-            let manifest_path = match find_pack_folder(&dir.path()) {
-                Some(found) => found,
-                None => {
-                    log::warn!("Cannot find pack manifest for dir: {:?}", dir.path());
-                    continue;
-                }
+            let Some(manifest_path) = find_pack_folder(&dir.path()) else {
+                log::warn!("Cannot find pack manifest for dir: {:?}", dir.path());
+                continue;
             };
             let validpack = match ValidPack::parse_manifest(manifest_path) {
                 Ok(pack) => pack,
