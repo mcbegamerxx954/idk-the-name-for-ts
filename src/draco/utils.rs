@@ -1,16 +1,13 @@
-// use json_strip_comments::{strip_comments_in_place, CommentSettings};
+use super::errors::{DataError, PackParseError};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fmt::Display;
 use std::fs::File;
 use std::hash::Hash;
-use std::num::ParseIntError;
 use std::ops::Range;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::{fmt, fs, io};
 use struson::json_path;
 use struson::reader::{JsonReader, JsonStreamReader, ReaderError, ReaderSettings};
 const JSON_SETTINGS: ReaderSettings = ReaderSettings {
@@ -38,40 +35,6 @@ pub struct ValidPack {
     version: Vec<u32>,
 }
 
-macro_rules! from_error {
-    ($dis:ident, $errorType:ty, $targetError:ty) => {
-        impl From<$errorType> for $targetError {
-            fn from(value: $errorType) -> Self {
-                Self::$dis(value)
-            }
-        }
-    };
-}
-from_error!(IoError, std::io::Error, PackParseError);
-from_error!(JsonParse, ReaderError, PackParseError);
-from_error!(VersionParse, ParseIntError, PackParseError);
-impl Display for PackParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::JsonParse(e) => write!(f, "Manifest parsing error {e}"),
-            Self::IoError(e) => write!(f, "Io error while reading: {e}"),
-            Self::InvalidManifest(e) => write!(f, "Manifest file is missing a value: {e}"),
-            Self::VersionParse(e) => write!(f, "Failed parsing version: {e}"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum PackParseError {
-    //    #[error("Manifest parsing error")]
-    JsonParse(struson::reader::ReaderError),
-    //    #[error("Io error while reading")]
-    IoError(std::io::Error),
-    //    #[error("Manifest is not valid")]
-    InvalidManifest(&'static str),
-    //    #[error("Error while parsing version")]
-    VersionParse(std::num::ParseIntError),
-}
 impl ValidPack {
     // We do not use serde because it is much more strict
     // than bedrock in terms of json parsing
@@ -85,16 +48,7 @@ impl ValidPack {
         while json.has_next()? {
             match json.next_name()? {
                 "uuid" => uuid = Some(json.next_string()?),
-                "version" => {
-                    json.begin_array()?;
-                    let mut numbers: Vec<u32> = Vec::new();
-                    while json.has_next()? {
-                        let workaround = json.next_number()?;
-                        numbers.push(workaround?);
-                    }
-                    json.end_array()?;
-                    version = Some(numbers);
-                }
+                "version" => version = Some(version_parse(&mut json)?),
                 _ => {
                     json.skip_value()?;
                 }
@@ -198,10 +152,11 @@ impl<'a> Eq for ResourcePath<'a> {}
 //impl Eq for ResourcePath {}
 fn is_interesting(entry: &DirEntry) -> bool {
     if entry.depth() == 1 {
-        return entry.file_name() == "renderer"
-            || entry.file_name() == "vanilla_cameras"
-            || entry.file_name() == "hbui"
-            || entry.file_name() == "custom_persona";
+        let file_name = entry.file_name();
+        return file_name == "renderer"
+            || file_name == "vanilla_cameras"
+            || file_name == "hbui"
+            || file_name == "custom_persona";
     }
     true
 }
@@ -234,16 +189,7 @@ impl GlobalPack {
             match json.next_name()? {
                 "pack_id" => pack_id = Some(json.next_string()?),
                 "subpack" => subpack = Some(json.next_string()?),
-                "version" => {
-                    json.begin_array()?;
-                    let mut numbers: Vec<u32> = Vec::new();
-                    while json.has_next()? {
-                        let workaround = json.next_number()?;
-                        numbers.push(workaround?);
-                    }
-                    json.end_array()?;
-                    version = Some(numbers);
-                }
+                "version" => version = Some(version_parse(json)?),
                 _ => {
                     json.skip_value()?;
                 }
@@ -259,31 +205,6 @@ impl GlobalPack {
     }
 }
 
-#[derive(Debug)]
-pub enum DataError {
-    InvalidData(&'static str),
-    JsonParse(ReaderError),
-    IoError(io::Error),
-    IntConvert(ParseIntError),
-    ManifestParse(PackParseError),
-}
-impl Display for DataError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidData(missing) => {
-                write!(f, "Data file is invalid, field {missing} is missing")
-            }
-            Self::JsonParse(e) => write!(f, "Data file parsing error: {e}"),
-            Self::IoError(e) => write!(f, "Io error while reading data: {e}"),
-            Self::IntConvert(e) => write!(f, "Error wgile parsing int: {e}"),
-            Self::ManifestParse(e) => write!(f, "Error while parsing manifest file: {e}"),
-        }
-    }
-}
-from_error!(IoError, io::Error, DataError);
-from_error!(ManifestParse, PackParseError, DataError);
-from_error!(JsonParse, ReaderError, DataError);
-from_error!(IntConvert, ParseIntError, DataError);
 impl DataManager {
     // Get minecraft paths and create itself
     pub fn init_data(json_path: PathBuf, resourcepacks_path: PathBuf) -> Self {
@@ -311,7 +232,7 @@ impl DataManager {
         Ok(final_paths)
     }
     fn get_installed_packs(&self) -> Result<Vec<ValidPack>, DataError> {
-        let pack_dirs = fs::read_dir(&self.resourcepacks_dir)?;
+        let pack_dirs = std::fs::read_dir(&self.resourcepacks_dir)?;
         let mut packs = Vec::new();
         for dir in pack_dirs.flatten() {
             if !dir.file_type()?.is_dir() {
@@ -356,14 +277,20 @@ fn find_pack_folder(path: &Path) -> Option<PathBuf> {
 fn compare(entry1: &DirEntry, entry2: &DirEntry) -> Ordering {
     let ftype1 = entry1.file_type();
     let ftype2 = entry2.file_type();
-    if ftype1.is_file() && !ftype2.is_file() {
-        return Ordering::Less;
+    match (ftype1.is_file(), ftype2.is_file()) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (true, true) => Ordering::Equal,
+        (false, false) => Ordering::Equal,
     }
-    if !ftype1.is_file() && ftype2.is_file() {
-        return Ordering::Greater;
+}
+fn version_parse<T: JsonReader>(json: &mut T) -> Result<Vec<u32>, PackParseError> {
+    let mut numbers = Vec::new();
+    json.begin_array()?;
+    while json.has_next()? {
+        let workaround = json.next_number()?;
+        numbers.push(workaround?);
     }
-    if ftype1.is_file() && ftype2.is_file() {
-        return Ordering::Equal;
-    }
-    Ordering::Equal
+    json.end_array()?;
+    Ok(numbers)
 }

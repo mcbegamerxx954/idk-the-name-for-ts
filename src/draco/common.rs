@@ -1,7 +1,8 @@
 use crate::LockResultExt;
 
+use super::errors::DataError;
 use super::storage::StorageLocation;
-use super::utils::{DataError, DataManager};
+use super::utils::DataManager;
 use super::SHADER_PATHS;
 use super::{get_storage_location, get_storage_path};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
