@@ -38,8 +38,8 @@ pub struct ValidPack {
 impl ValidPack {
     // We do not use serde because it is much more strict
     // than bedrock in terms of json parsing
-    fn parse_manifest(pack_path: PathBuf) -> Result<Self, PackParseError> {
-        let manifest = File::open(pack_path.join("manifest.json"))?;
+    fn parse_manifest(mut pack_path: PathBuf) -> Result<Self, PackParseError> {
+        let manifest = File::open(&pack_path)?;
         let mut json = JsonStreamReader::new_custom(manifest, JSON_SETTINGS);
         json.seek_to(&json_path!["header"])?;
         json.begin_object()?;
@@ -57,6 +57,7 @@ impl ValidPack {
         json.end_object()?;
         let uuid = uuid.ok_or(PackParseError::InvalidManifest("uuid"))?;
         let version = version.ok_or(PackParseError::InvalidManifest("version"))?;
+        pack_path.pop();
         Ok(Self {
             uuid,
             path: pack_path,
@@ -79,9 +80,8 @@ impl ValidPack {
 fn get_files(path: &Path, file_list: &mut HashSet<ResourcePath>) {
     let walker = walkdir::WalkDir::new(path);
     let iter = walker.into_iter().filter_entry(is_interesting).flatten();
-    for entry in iter {
-        let curr_path = entry.into_path();
-        let Some(resource_path) = ResourcePath::new(curr_path, path) else {
+    for file_path in iter.map(|e| e.into_path()) {
+        let Some(resource_path) = ResourcePath::new(file_path, path) else {
             continue;
         };
         file_list.insert(resource_path);
@@ -151,14 +151,12 @@ impl<'a> PartialEq for ResourcePath<'a> {
 impl<'a> Eq for ResourcePath<'a> {}
 //impl Eq for ResourcePath {}
 fn is_interesting(entry: &DirEntry) -> bool {
+    const ALLOWED_PATHS: [&[u8]; 4] = [b"renderer", b"vanilla_cameras", b"hbui", b"custom_persona"];
     if entry.depth() == 1 {
-        let file_name = entry.file_name();
-        return file_name == "renderer"
-            || file_name == "vanilla_cameras"
-            || file_name == "hbui"
-            || file_name == "custom_persona";
+        ALLOWED_PATHS.contains(&entry.file_name().as_bytes())
+    } else {
+        true
     }
-    true
 }
 // A active global pack
 #[derive(Debug)]
@@ -217,9 +215,9 @@ impl DataManager {
     // Get a list of shader paths
     pub fn shader_paths<'a>(&self) -> Result<HashSet<ResourcePath<'a>>, DataError> {
         let global_packs: Vec<GlobalPack> = GlobalPack::parse(&self.active_packs_path)?;
-        log::info!("global_packs parsed: {:#?}", global_packs);
+        log::debug!("global_packs parsed: {:#?}", global_packs);
         let packs = self.get_installed_packs()?;
-        log::info!("Installed packs: {packs:#?}");
+        log::debug!("Installed packs: {packs:#?}");
         let mut final_paths = HashSet::new();
         // Explanation: we use .rev to reverse the iterator since this way we can avoid
         // some checks
@@ -238,14 +236,14 @@ impl DataManager {
             if !dir.file_type()?.is_dir() {
                 continue;
             }
-            let Some(manifest_path) = find_pack_folder(&dir.path()) else {
+            let Some(manifest_path) = find_pack_manifest(&dir.path()) else {
                 log::warn!("Cannot find pack manifest for dir: {:?}", dir.path());
                 continue;
             };
             let validpack = match ValidPack::parse_manifest(manifest_path) {
                 Ok(pack) => pack,
                 Err(err) => {
-                    log::info!("Pack manifest parse failed: {err}");
+                    log::error!("Pack manifest parse failed: {err}");
                     continue;
                 }
             };
@@ -260,16 +258,13 @@ fn matches_pack(global_pack: &GlobalPack, valid_pack: &ValidPack) -> bool {
 }
 
 // This is rare, but can happen
-fn find_pack_folder(path: &Path) -> Option<PathBuf> {
+fn find_pack_manifest(path: &Path) -> Option<PathBuf> {
     let walker = walkdir::WalkDir::new(path).sort_by(compare);
-    for entry in walker.into_iter().flatten() {
-        if entry.file_name() == "manifest.json" && entry.file_type().is_file() {
-            let mut path = entry.into_path();
-            let _ = path.pop();
-            return Some(path);
-        }
-    }
-    None
+    walker
+        .into_iter()
+        .flatten()
+        .find(|entry| entry.file_name() == "manifest.json" && entry.file_type().is_file())
+        .map(|e| e.into_path())
 }
 fn compare(entry1: &DirEntry, entry2: &DirEntry) -> Ordering {
     let ftype1 = entry1.file_type();
