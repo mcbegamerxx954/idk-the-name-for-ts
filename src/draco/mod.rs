@@ -40,8 +40,8 @@ hook_fn! {
     }
 }
 pub fn is_edu_hk(env: &mut JNIEnv, thiz: &JObject) -> Result<(), Box<dyn Error>> {
-    let external_path = get_jni_path(env, &thiz, "getExternalStoragePath")?;
-    let internal_path = get_jni_path(env, &thiz, "getInternalStoragePath")?;
+    let external_path = get_jni_path(env, thiz, "getExternalStoragePath")?;
+    let internal_path = get_jni_path(env, thiz, "getInternalStoragePath")?;
     let paths = JniPaths {
         internal_path,
         external_path,

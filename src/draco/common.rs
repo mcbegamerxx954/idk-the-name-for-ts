@@ -53,7 +53,7 @@ pub(crate) fn setup_json_watcher(path: PathBuf) {
                 continue;
             }
         };
-        log::info!("Recieved interesting event: {:#?}", event);
+        log::debug!("Recieved interesting event: {:#?}", event);
         // Get the first filename in the event
         let Some(path) = event.paths.first() else {
             log::warn!("No event path found");

@@ -58,10 +58,11 @@ pub(crate) unsafe fn open(
         return aasset;
     };
     // This is meant to strip the new "asset" folder path so we can be compatible with other versions
-    let stripped = match c_path.strip_prefix("assets/") {
-        Ok(yay) => yay,
-        Err(_e) => c_path,
+    let stripped = c_path.strip_prefix("assets/").unwrap_or(c_path);
+    let Some(backend) = BACKEND.get() else {
+        return aasset;
     };
+
     #[cfg(feature = "autofixing")]
     let Some(manager_ptr) = std::ptr::NonNull::new(man) else {
         return aasset;
@@ -75,41 +76,38 @@ pub(crate) unsafe fn open(
         apk: "renderer/" -> pack: "renderer/",
         apk: "resource_packs/vanilla/cameras/" -> pack: "vanilla_cameras/",
     };
-    for replacement in replacement_list {
-        // Remove the prefix we want to change
-        if let Ok(file) = stripped.strip_prefix(replacement.0) {
-            let Some(backend) = BACKEND.get() else {
-                return aasset;
-            };
-            let mut sus = [0; 128];
-            let joined_path = opt_path_join(&mut sus, &[Path::new(replacement.1), file]);
-            let buffer = match backend(joined_path.as_ref()) {
-                Some(yay) => match yay {
-                    Ok(yay) => yay,
-                    Err(e) => {
-                        log::error!("fuck: {e}");
-                        return aasset;
-                    }
-                },
-                None => {
-                    return aasset;
-                }
-            };
-            #[cfg(feature = "autofixing")]
-            let buffer = if os_filename.as_encoded_bytes().ends_with(b".material.bin") {
-                let buffer = buffer.to_vec().unwrap();
-                match crate::autofixer::process_material(manager, &buffer) {
-                    Some(updated) => CowFile::Buffer(Cursor::new(updated)),
-                    None => CowFile::Buffer(Cursor::new(buffer)),
-                }
-            } else {
-                buffer
-            };
-            let mut wanted_lock = WANTED_ASSETS.lock().ignore_poison();
-            wanted_lock.insert(AAssetPtr(aasset), buffer);
-            // we do not clwan cxx string because cxx ceate does that for us
+    if let Some((file, pack_path)) = replacement_list
+        .iter()
+        .find_map(|(apk, pack)| Some((stripped.strip_prefix(apk).ok()?, pack)))
+    {
+        let mut sus = [0; 128];
+        let joined_path = opt_path_join(&mut sus, &[Path::new(pack_path), file]);
+        let Some(buffer) = backend(joined_path.as_ref()) else {
+            log::debug!("Cant find file {:#?}", joined_path);
             return aasset;
-        }
+        };
+        let buffer = match buffer {
+            Ok(yay) => yay,
+            Err(e) => {
+                log::error!("fuck: {e}");
+                return aasset;
+            }
+        };
+        #[cfg(feature = "autofixing")]
+        let buffer = if os_filename.as_encoded_bytes().ends_with(b".material.bin") {
+            let buffer = buffer.to_vec().unwrap();
+            match crate::autofixer::process_material(manager, &buffer) {
+                Some(updated) => CowFile::Buffer(Cursor::new(updated)),
+                None => CowFile::Buffer(Cursor::new(buffer)),
+            }
+        } else {
+            buffer
+        };
+        let mut wanted_lock = WANTED_ASSETS.lock().ignore_poison();
+        wanted_lock.insert(AAssetPtr(aasset), buffer);
+        log::info!("Loaded file {:#?}", joined_path);
+        // we do not clwan cxx string because cxx ceate does that for us
+        return aasset;
     }
     aasset
 }

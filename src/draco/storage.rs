@@ -50,7 +50,7 @@ impl StorageLocation {
 pub fn parse_storage_location(opt_path: &Path) -> Result<i8, OptionsError> {
     let file = File::open(opt_path)?;
     let reader = BufReader::new(file);
-    for line in reader.lines().flatten() {
+    for line in reader.lines().map_while(|e| e.ok()) {
         let Some((key, value)) = line.split_once(':') else {
             log::error!("Cannot find separator ':' in line of options.txt");
             continue;
