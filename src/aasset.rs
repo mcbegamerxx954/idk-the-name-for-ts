@@ -96,10 +96,8 @@ pub(crate) unsafe fn open(
         #[cfg(feature = "autofixing")]
         let buffer = if os_filename.as_encoded_bytes().ends_with(b".material.bin") {
             let buffer = buffer.to_vec().unwrap();
-            match crate::autofixer::process_material(manager, &buffer) {
-                Some(updated) => CowFile::Buffer(Cursor::new(updated)),
-                None => CowFile::Buffer(Cursor::new(buffer)),
-            }
+            let vec = crate::autofixer::process_material(manager, &buffer).unwrap_or(buffer);
+            CowFile::Buffer(Cursor::new(vec))
         } else {
             buffer
         };

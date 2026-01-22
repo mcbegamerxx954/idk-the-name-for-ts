@@ -47,13 +47,10 @@ fn main() {
     setup_logging();
     log::info!("Starting");
     #[cfg(all(feature = "mbl2", feature = "draco"))]
-    let backend = match mbl::startup() {
-        Some(yay) => yay,
-        None => {
-            log::warn!("Mbl2 start failed, using draco");
-            draco::startup()
-        }
-    };
+    let backend = mbl::startup().unwrap_or_else(|| {
+        log::warn!("Mbl2 start failed, using draco");
+        draco::startup()
+    });
     #[cfg(all(feature = "mbl2", not(feature = "draco")))]
     let backend = mbl::startup().unwrap();
     #[cfg(all(feature = "draco", not(feature = "mbl2")))]

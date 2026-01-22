@@ -26,12 +26,9 @@ static MC_IS_1_21_100: AtomicBool = AtomicBool::new(false);
 static MC_IS_1_21_130: AtomicBool = AtomicBool::new(false);
 
 fn get_current_mcver(man: AssetManager) -> Option<MinecraftVersion> {
-    let buf = match get_uitext(man) {
-        Some(asset) => asset,
-        None => {
-            log::error!("Shader fixing is disabled as RenderChunk was not found");
-            return None;
-        }
+    let Some(buf) = get_uitext(man) else {
+        log::error!("Shader fixing is disabled as RenderChunk was not found");
+        return None;
     };
 
     for version in materialbin::ALL_VERSIONS.into_iter().rev() {
@@ -130,6 +127,8 @@ fn handle_lightmaps(
     let legacy_assign2 = Finder::new(b"v_lightmapUV=a_texcoord1;");
     let magic_fix_number = Finder::new(b"65535.0");
     let newbx_fix = Finder::new("vec2(256.0, 4096.0)");
+
+    let is_1_21_130 = MC_IS_1_21_130.load(Ordering::Acquire);
     for (_, scode) in materialbin
         .passes
         .iter_mut()
@@ -152,7 +151,6 @@ fn handle_lightmaps(
         //     continue;
         // };
         let code = &scode.bgfx_shader_data;
-        let is_1_21_130 = MC_IS_1_21_130.load(Ordering::Acquire);
         let has_fix = magic_fix_number.find(code).is_some() || newbx_fix.find(code).is_some();
         let replace_with: &[u8];
         // shader is 1-21-100 or above

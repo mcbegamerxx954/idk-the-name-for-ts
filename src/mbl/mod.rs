@@ -1,19 +1,15 @@
-//#[deny(clippy::indexing_slicing)]
 mod cxx_utils;
 pub use cxx_utils::StackString;
 mod loader;
-use std::io::Cursor;
-use std::{fs, io, sync::Mutex};
-// mod aasset;
-// mod jniopts;
-// mod plthook;
 use crate::mbl::cxx_utils::ResourceLocation;
 use crate::{aasset::CowFile, mbl::loader::ResourcePackManager};
 use crate::{BackendFn, LockResultExt};
+use atoi::FromRadix16;
 use bhook::hook_fn;
 use bstr::ByteSlice;
-//use bstr::ByteSlice;
-use atoi::FromRadix16;
+use core::slice;
+use std::io::Cursor;
+use std::{fs, io, sync::Mutex};
 use tinypatscan::Pattern;
 
 #[cfg(target_arch = "aarch64")]
@@ -93,10 +89,7 @@ impl SimpleMapRange {
 fn find_minecraft_library_manually() -> Result<Vec<SimpleMapRange>, Box<dyn std::error::Error>> {
     let contents = fs::read("/proc/self/maps")?;
     let mut ranges = Vec::new();
-    for line in contents.lines() {
-        if line.trim_ascii().is_empty() {
-            continue;
-        }
+    for line in contents.lines().filter(|l| !l.trim_ascii().is_empty()) {
         // Not too pretty but this method prevents crashes
         let Some((addr_start, addr_end)) = parse_range(line) else {
             continue;
@@ -132,7 +125,7 @@ fn find_signatures(signatures: &[Pattern], ranges: &[SimpleMapRange]) -> Option<
     for sig in signatures {
         for range in ranges {
             let libbytes =
-                unsafe { core::slice::from_raw_parts(range.start() as *const u8, range.size()) };
+                unsafe { slice::from_raw_parts(range.start() as *const u8, range.size()) };
             let addr = sig.search(libbytes, tinypatscan::Algorithm::Simd);
             if let Some(val) = addr {
                 let addr = unsafe { libbytes.as_ptr().byte_add(val) };

@@ -59,3 +59,23 @@ from_error!(IoError, IoErr, DataError);
 from_error!(ManifestParse, PackParseError, DataError);
 from_error!(JsonParse, ReaderError, DataError);
 from_error!(IntConvert, ParseIntError, DataError);
+#[derive(Debug)]
+pub enum OptionsError {
+    //    #[error("Options file reading error")]
+    Io(IoErr),
+    //    #[error("Storage locations int parse error")]
+    IntParse(ParseIntError),
+    //    #[error("Options file parsing error")]
+    NotFound,
+}
+impl Display for OptionsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "Options file reading error: {e}"),
+            Self::IntParse(e) => write!(f, "Storage location parse error: {e}"),
+            Self::NotFound => write!(f, "Parse error"),
+        }
+    }
+}
+from_error!(Io, IoErr, OptionsError);
+from_error!(IntParse, ParseIntError, OptionsError);
