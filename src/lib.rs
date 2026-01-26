@@ -117,3 +117,13 @@ fn find_lib<'a>(target_name: &str) -> Option<plt_rs::LoadedLibrary<'a>> {
         .into_iter()
         .find(|lib| lib.name().contains(target_name))
 }
+pub trait InspectNone {
+    fn inspect_none(&self, closure: fn());
+}
+impl<T> InspectNone for Option<T> {
+    fn inspect_none(&self, closure: fn()) {
+        if self.is_none() {
+            closure();
+        }
+    }
+}

@@ -9,7 +9,7 @@ use bhook::hook_fn;
 use bstr::ByteSlice;
 use core::slice;
 use std::io::Cursor;
-use std::{fs, io, sync::Mutex};
+use std::{fs, sync::Mutex};
 use tinypatscan::Pattern;
 
 #[cfg(target_arch = "aarch64")]

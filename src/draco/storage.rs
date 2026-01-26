@@ -4,13 +4,13 @@ use std::{
     io::{BufRead, BufReader},
     path::Path,
 };
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum StorageLocation {
     Internal,
     External,
 }
 impl StorageLocation {
-    pub fn from_i8(int: i8) -> Option<Self> {
+    pub const fn from_i8(int: i8) -> Option<Self> {
         match int {
             1 => Some(Self::External),
             2 => Some(Self::Internal),

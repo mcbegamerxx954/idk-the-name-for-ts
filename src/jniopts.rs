@@ -17,13 +17,13 @@ macro_rules! native_method {
     };
 }
 #[no_mangle]
-extern "C" fn JNI_OnLoad(mut vm: JavaVM, _: c_void) -> jint {
-    if let Err(e) = jni_start(&mut vm) {
+extern "C" fn JNI_OnLoad(vm: JavaVM, _: c_void) -> jint {
+    if let Err(e) = jni_start(&vm) {
         log::error!("Error in jni_onload: {e}");
     }
     JNI_VERSION_1_6
 }
-fn jni_start(vm: &mut JavaVM) -> jni::errors::Result<()> {
+fn jni_start(vm: &JavaVM) -> jni::errors::Result<()> {
     let mut env = vm.get_env()?;
     let clazz = env.find_class("io/bambosan/mbloader/launcherUtils/LibBindings")?;
     #[cfg(feature = "autofixing")]
@@ -79,7 +79,10 @@ extern "C" fn setTextureLodAutofixer(_env: JNIEnv, _thiz: JObject, on: jboolean)
     opts.handle_texturelods = to_bool(on);
 }
 pub trait NativeMethodCtor {
-    fn new(name: &str, sig: &str, fn_ptr: *mut c_void) -> NativeMethod {
+    fn new(name: &str, sig: &str, fn_ptr: *mut c_void) -> Self;
+}
+impl NativeMethodCtor for NativeMethod {
+    fn new(name: &str, sig: &str, fn_ptr: *mut c_void) -> Self {
         NativeMethod {
             name: name.into(),
             sig: sig.into(),
@@ -87,7 +90,6 @@ pub trait NativeMethodCtor {
         }
     }
 }
-impl NativeMethodCtor for NativeMethod {}
-fn to_bool(jni_bool: jboolean) -> bool {
+const fn to_bool(jni_bool: jboolean) -> bool {
     jni_bool == JNI_TRUE
 }

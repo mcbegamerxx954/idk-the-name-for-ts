@@ -40,7 +40,7 @@ macro_rules! folder_list {
         ]
     }
 }
-pub(crate) unsafe fn open(
+pub unsafe fn open(
     man: *mut AAssetManager,
     fname: *const libc::c_char,
     mode: libc::c_int,
@@ -95,7 +95,7 @@ pub(crate) unsafe fn open(
         };
         #[cfg(feature = "autofixing")]
         let buffer = if os_filename.as_encoded_bytes().ends_with(b".material.bin") {
-            let buffer = buffer.to_vec().unwrap();
+            let buffer = buffer.into_vec().unwrap();
             let vec = crate::autofixer::process_material(manager, &buffer).unwrap_or(buffer);
             CowFile::Buffer(Cursor::new(vec))
         } else {
@@ -133,7 +133,7 @@ fn opt_path_join<'a>(bytes: &'a mut [u8; 128], paths: &[&Path]) -> Cow<'a, Path>
     let osstr = OsStr::from_bytes(&bytes[..len]);
     Cow::Borrowed(Path::new(osstr))
 }
-pub(crate) unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_int) -> off64_t {
+pub unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_int) -> off64_t {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
@@ -142,7 +142,7 @@ pub(crate) unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_i
     seek_facade(off, whence, file) as off64_t
 }
 
-pub(crate) unsafe fn seek(aasset: *mut AAsset, off: off_t, whence: libc::c_int) -> off_t {
+pub unsafe fn seek(aasset: *mut AAsset, off: off_t, whence: libc::c_int) -> off_t {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
@@ -150,10 +150,10 @@ pub(crate) unsafe fn seek(aasset: *mut AAsset, off: off_t, whence: libc::c_int) 
     };
     // This code can be very deadly on large files,
     // But Minecraft does not use this so we are safe 😆😆
-    seek_facade(off.into(), whence, file) as off_t
+    seek_facade(off, whence, file) as off_t
 }
 
-pub(crate) unsafe fn read(
+pub unsafe fn read(
     aasset: *mut AAsset,
     buf: *mut libc::c_void,
     count: libc::size_t,
@@ -175,7 +175,7 @@ pub(crate) unsafe fn read(
     read_total as libc::c_int
 }
 
-pub(crate) unsafe fn len(aasset: *mut AAsset) -> off_t {
+pub unsafe fn len(aasset: *mut AAsset) -> off_t {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get(&AAssetPtr(aasset)) {
         Some(file) => file,
@@ -184,7 +184,7 @@ pub(crate) unsafe fn len(aasset: *mut AAsset) -> off_t {
     file.len().unwrap() as off_t
 }
 
-pub(crate) unsafe fn len64(aasset: *mut AAsset) -> off64_t {
+pub unsafe fn len64(aasset: *mut AAsset) -> off64_t {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get(&AAssetPtr(aasset)) {
         Some(file) => file,
@@ -193,7 +193,7 @@ pub(crate) unsafe fn len64(aasset: *mut AAsset) -> off64_t {
     file.len().unwrap() as off64_t
 }
 
-pub(crate) unsafe fn rem(aasset: *mut AAsset) -> off_t {
+pub unsafe fn rem(aasset: *mut AAsset) -> off_t {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
@@ -202,7 +202,7 @@ pub(crate) unsafe fn rem(aasset: *mut AAsset) -> off_t {
     file.rem().unwrap() as off_t
 }
 
-pub(crate) unsafe fn rem64(aasset: *mut AAsset) -> off64_t {
+pub unsafe fn rem64(aasset: *mut AAsset) -> off64_t {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
@@ -211,14 +211,14 @@ pub(crate) unsafe fn rem64(aasset: *mut AAsset) -> off64_t {
     file.rem().unwrap() as off64_t
 }
 
-pub(crate) unsafe fn close(aasset: *mut AAsset) {
+pub unsafe fn close(aasset: *mut AAsset) {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     if wanted_assets.remove(&AAssetPtr(aasset)).is_none() {
         ndk_sys::AAsset_close(aasset);
     }
 }
 
-pub(crate) unsafe fn get_buffer(aasset: *mut AAsset) -> *const libc::c_void {
+pub unsafe fn get_buffer(aasset: *mut AAsset) -> *const libc::c_void {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
         Some(file) => file,
@@ -228,7 +228,7 @@ pub(crate) unsafe fn get_buffer(aasset: *mut AAsset) -> *const libc::c_void {
     file.raw_buffer().unwrap().cast()
 }
 
-pub(crate) unsafe fn fd_dummy(
+pub unsafe fn fd_dummy(
     aasset: *mut AAsset,
     out_start: *mut off_t,
     out_len: *mut off_t,
@@ -243,7 +243,7 @@ pub(crate) unsafe fn fd_dummy(
     }
 }
 
-pub(crate) unsafe fn fd_dummy64(
+pub unsafe fn fd_dummy64(
     aasset: *mut AAsset,
     out_start: *mut off64_t,
     out_len: *mut off64_t,
@@ -258,7 +258,7 @@ pub(crate) unsafe fn fd_dummy64(
     }
 }
 
-pub(crate) unsafe fn is_alloc(aasset: *mut AAsset) -> libc::c_int {
+pub unsafe fn is_alloc(aasset: *mut AAsset) -> libc::c_int {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
     match wanted_assets.get(&AAssetPtr(aasset)) {
         Some(_) => false as libc::c_int,
@@ -357,7 +357,7 @@ impl CowFile {
         Ok(ptr)
     }
     #[cfg(feature = "autofixing")]
-    fn to_vec(self) -> io::Result<Vec<u8>> {
+    fn into_vec(self) -> io::Result<Vec<u8>> {
         match self {
             Self::File(mut f) => {
                 let mut buffer = Vec::with_capacity(f.metadata()?.len() as usize);

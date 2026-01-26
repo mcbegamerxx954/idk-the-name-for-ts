@@ -143,7 +143,7 @@ pub struct ResourcePackManager(*mut libc::c_void);
 //unsafe impl Sync for ResourcePackManager {}
 unsafe impl Send for ResourcePackManager {}
 impl ResourcePackManager {
-    pub fn wrap(ptr: *mut libc::c_void) -> Self {
+    pub const fn wrap(ptr: *mut libc::c_void) -> Self {
         Self(ptr)
     }
     pub fn load_resource(&self, loc: ResourceLocation) -> Option<StackString> {

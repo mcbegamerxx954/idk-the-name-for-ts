@@ -110,7 +110,7 @@ impl GlobalPack {
         let mut global_packs = Vec::new();
         while json.has_next()? {
             json.begin_object()?;
-            global_packs.push(GlobalPack::parse_one(&mut json)?);
+            global_packs.push(Self::parse_one(&mut json)?);
             json.end_object()?;
         }
         json.end_array()?;
@@ -140,7 +140,7 @@ impl GlobalPack {
 
 impl DataManager {
     // Get minecraft paths and create itself
-    pub fn init_data(json_path: PathBuf, resourcepacks_path: PathBuf) -> Self {
+    pub const fn init_data(json_path: PathBuf, resourcepacks_path: PathBuf) -> Self {
         Self {
             resourcepacks_dir: resourcepacks_path,
             active_packs_path: json_path,

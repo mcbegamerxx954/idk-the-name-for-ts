@@ -83,6 +83,8 @@ pub fn process_material(man: AssetManager, data: &[u8]) -> Option<Vec<u8>> {
             && mcver >= MinecraftVersion::V1_20_80
             && version <= MinecraftVersion::V1_19_60
             && opts.handle_texturelods;
+        // When the mutex
+        drop(opts);
         // Prevent some work
         if version == mcver && !needs_lightmap_fix && !needs_sampler_fix {
             log::info!("Did not fix mtbin, mtversion: {version}");
@@ -253,7 +255,7 @@ impl AssetManager {
         Some(vec)
         //        None
     }
-    pub fn from_ptr(ptr: NonNull<AAssetManager>) -> Self {
+    pub const fn from_ptr(ptr: NonNull<AAssetManager>) -> Self {
         Self(ptr)
     }
 }

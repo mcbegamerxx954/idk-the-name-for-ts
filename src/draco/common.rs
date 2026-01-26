@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 pub static SHOULD_STOP: AtomicBool = AtomicBool::new(false);
-pub(crate) fn setup_json_watcher(path: PathBuf) {
+pub fn setup_json_watcher(path: PathBuf) {
     let options_path = path.join("options.txt");
     let current_location = get_storage_location(&options_path).unwrap_or(StorageLocation::Internal);
     let path = get_storage_path(current_location);
