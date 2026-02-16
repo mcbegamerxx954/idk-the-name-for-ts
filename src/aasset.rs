@@ -13,7 +13,7 @@ use std::{
     collections::HashMap,
     ffi::{CStr, OsStr},
     fs::File,
-    io::{self, Cursor, Read, Seek},
+    io::{self, Cursor, Read, Seek, Write},
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     sync::{LazyLock, Mutex, OnceLock},
@@ -109,28 +109,23 @@ pub unsafe fn open(
     }
     aasset
 }
-
 /// Join paths without allocating if possible, or
 /// if the joined path does not fit the buffer then just
 /// allocate instead
 fn opt_path_join<'a>(bytes: &'a mut [u8; 128], paths: &[&Path]) -> Cow<'a, Path> {
     let total_len: usize = paths.iter().map(|p| p.as_os_str().len()).sum();
     if total_len > bytes.len() {
-        // panic!("fuck");
-        let mut pathbuf = PathBuf::new();
-        for path in paths {
-            pathbuf.push(path);
-        }
+        let pathbuf = paths.iter().collect();
         return Cow::Owned(pathbuf);
     }
-
-    let mut len = 0;
+    let mut byte_writer = Cursor::new(*bytes);
     for path in paths {
-        let osstr = path.as_os_str().as_bytes();
-        (bytes[len..len + osstr.len()]).copy_from_slice(osstr);
-        len += osstr.len();
+        let os_str_bytes = path.as_os_str().as_bytes();
+        if let Err(_err) = byte_writer.write(os_str_bytes) {
+            return Cow::Owned(paths.iter().collect());
+        };
     }
-    let osstr = OsStr::from_bytes(&bytes[..len]);
+    let osstr = OsStr::from_bytes(&bytes[..byte_writer.position() as usize]);
     Cow::Borrowed(Path::new(osstr))
 }
 pub unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_int) -> off64_t {
