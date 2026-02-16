@@ -1,13 +1,10 @@
-//use crate::ResourceLocation;
-use libc::{off64_t, off_t};
-//use ndk::asset::AssetManager;
-use ndk_sys::{AAsset, AAssetManager};
-//use once_cell::sync::Lazy;
 #[cfg(feature = "autofixing")]
 use crate::autofixer::AssetManager;
 #[cfg(feature = "mbl2")]
 use crate::mbl::StackString;
 use crate::{BackendFn, LockResultExt};
+use libc::{off64_t, off_t};
+use ndk_sys::{AAsset, AAssetManager};
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -15,7 +12,7 @@ use std::{
     fs::File,
     io::{self, Cursor, Read, Seek, Write},
     os::unix::ffi::OsStrExt,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{LazyLock, Mutex, OnceLock},
 };
 
@@ -156,14 +153,13 @@ pub unsafe fn read(
     };
     // Reuse buffer given by caller
     let rs_buffer = core::slice::from_raw_parts_mut(buf as *mut u8, count);
-    let read_total = match file.read(rs_buffer) {
-        Ok(n) => n,
+    match file.read(rs_buffer) {
+        Ok(n) => n as libc::c_int,
         Err(e) => {
             log::warn!("failed fake aaset read: {e}");
-            return -1 as libc::c_int;
+            -1
         }
-    };
-    read_total as libc::c_int
+    }
 }
 
 pub unsafe fn len(aasset: *mut AAsset) -> off_t {
@@ -220,12 +216,11 @@ pub unsafe fn fd_dummy(
     out_len: *mut off_t,
 ) -> libc::c_int {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    match wanted_assets.get(&AAssetPtr(aasset)) {
-        Some(_) => {
-            log::error!("WE GOT BUSTED NOOO");
-            -1
-        }
-        None => ndk_sys::AAsset_openFileDescriptor(aasset, out_start, out_len),
+    if let None = wanted_assets.get(&AAssetPtr(aasset)) {
+        ndk_sys::AAsset_openFileDescriptor(aasset, out_start, out_len)
+    } else {
+        log::error!("WE GOT BUSTED NOOO");
+        -1
     }
 }
 
@@ -245,7 +240,7 @@ pub unsafe fn fd_dummy64(
 
 pub unsafe fn is_alloc(aasset: *mut AAsset) -> libc::c_int {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    if let Some(_) = wanted_assets.get(&AAssetPtr(aasset)) {
+    if wanted_assets.get(&AAssetPtr(aasset)).is_some() {
         false as libc::c_int
     } else {
         ndk_sys::AAsset_isAllocated(aasset)
