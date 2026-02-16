@@ -62,7 +62,6 @@ pub unsafe fn open(
     let Some(backend) = BACKEND.get() else {
         return aasset;
     };
-
     #[cfg(feature = "autofixing")]
     let Some(manager_ptr) = std::ptr::NonNull::new(man) else {
         return aasset;
@@ -130,18 +129,16 @@ fn opt_path_join<'a>(bytes: &'a mut [u8; 128], paths: &[&Path]) -> Cow<'a, Path>
 }
 pub unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_int) -> off64_t {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
-        Some(file) => file,
-        None => return ndk_sys::AAsset_seek64(aasset, off, whence),
+    let Some(file) = wanted_assets.get_mut(&AAssetPtr(aasset)) else {
+        return ndk_sys::AAsset_seek64(aasset, off, whence);
     };
     seek_facade(off, whence, file) as off64_t
 }
 
 pub unsafe fn seek(aasset: *mut AAsset, off: off_t, whence: libc::c_int) -> off_t {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
-        Some(file) => file,
-        None => return ndk_sys::AAsset_seek(aasset, off, whence),
+    let Some(file) = wanted_assets.get_mut(&AAssetPtr(aasset)) else {
+        return ndk_sys::AAsset_seek(aasset, off, whence);
     };
     // This code can be very deadly on large files,
     // But Minecraft does not use this so we are safe 😆😆
@@ -154,9 +151,8 @@ pub unsafe fn read(
     count: libc::size_t,
 ) -> libc::c_int {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
-        Some(file) => file,
-        None => return ndk_sys::AAsset_read(aasset, buf, count),
+    let Some(file) = wanted_assets.get_mut(&AAssetPtr(aasset)) else {
+        return ndk_sys::AAsset_read(aasset, buf, count);
     };
     // Reuse buffer given by caller
     let rs_buffer = core::slice::from_raw_parts_mut(buf as *mut u8, count);
@@ -172,36 +168,32 @@ pub unsafe fn read(
 
 pub unsafe fn len(aasset: *mut AAsset) -> off_t {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    let file = match wanted_assets.get(&AAssetPtr(aasset)) {
-        Some(file) => file,
-        None => return ndk_sys::AAsset_getLength(aasset),
+    let Some(file) = wanted_assets.get(&AAssetPtr(aasset)) else {
+        return ndk_sys::AAsset_getLength(aasset);
     };
     file.len().unwrap() as off_t
 }
 
 pub unsafe fn len64(aasset: *mut AAsset) -> off64_t {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    let file = match wanted_assets.get(&AAssetPtr(aasset)) {
-        Some(file) => file,
-        None => return ndk_sys::AAsset_getLength64(aasset),
+    let Some(file) = wanted_assets.get(&AAssetPtr(aasset)) else {
+        return ndk_sys::AAsset_getLength64(aasset);
     };
     file.len().unwrap() as off64_t
 }
 
 pub unsafe fn rem(aasset: *mut AAsset) -> off_t {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
-        Some(file) => file,
-        None => return ndk_sys::AAsset_getRemainingLength(aasset),
+    let Some(file) = wanted_assets.get_mut(&AAssetPtr(aasset)) else {
+        return ndk_sys::AAsset_getRemainingLength(aasset);
     };
     file.rem().unwrap() as off_t
 }
 
 pub unsafe fn rem64(aasset: *mut AAsset) -> off64_t {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
-        Some(file) => file,
-        None => return ndk_sys::AAsset_getRemainingLength64(aasset),
+    let Some(file) = wanted_assets.get_mut(&AAssetPtr(aasset)) else {
+        return ndk_sys::AAsset_getRemainingLength64(aasset);
     };
     file.rem().unwrap() as off64_t
 }
@@ -215,9 +207,8 @@ pub unsafe fn close(aasset: *mut AAsset) {
 
 pub unsafe fn get_buffer(aasset: *mut AAsset) -> *const libc::c_void {
     let mut wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    let file = match wanted_assets.get_mut(&AAssetPtr(aasset)) {
-        Some(file) => file,
-        None => return ndk_sys::AAsset_getBuffer(aasset),
+    let Some(file) = wanted_assets.get_mut(&AAssetPtr(aasset)) else {
+        return ndk_sys::AAsset_getBuffer(aasset);
     };
     // Lets hope this does not go boom boom
     file.raw_buffer().unwrap().cast()
@@ -244,20 +235,20 @@ pub unsafe fn fd_dummy64(
     out_len: *mut off64_t,
 ) -> libc::c_int {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    match wanted_assets.get(&AAssetPtr(aasset)) {
-        Some(_) => {
-            log::error!("WE GOT BUSTED NOOO");
-            -1
-        }
-        None => ndk_sys::AAsset_openFileDescriptor64(aasset, out_start, out_len),
+    if let None = wanted_assets.get(&AAssetPtr(aasset)) {
+        ndk_sys::AAsset_openFileDescriptor64(aasset, out_start, out_len)
+    } else {
+        log::error!("WE GOT BUSTED NOOO");
+        -1
     }
 }
 
 pub unsafe fn is_alloc(aasset: *mut AAsset) -> libc::c_int {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    match wanted_assets.get(&AAssetPtr(aasset)) {
-        Some(_) => false as libc::c_int,
-        None => ndk_sys::AAsset_isAllocated(aasset),
+    if let Some(_) = wanted_assets.get(&AAssetPtr(aasset)) {
+        false as libc::c_int
+    } else {
+        ndk_sys::AAsset_isAllocated(aasset)
     }
 }
 
