@@ -114,14 +114,15 @@ fn opt_path_join<'a>(bytes: &'a mut [u8; 128], paths: &[&Path]) -> Cow<'a, Path>
         let pathbuf = paths.iter().collect();
         return Cow::Owned(pathbuf);
     }
-    let mut byte_writer = Cursor::new(*bytes);
+    let mut byte_writer = Cursor::new(bytes.as_mut_slice());
     for path in paths {
         let os_str_bytes = path.as_os_str().as_bytes();
         if let Err(_err) = byte_writer.write(os_str_bytes) {
             return Cow::Owned(paths.iter().collect());
         };
     }
-    let osstr = OsStr::from_bytes(&bytes[..byte_writer.position() as usize]);
+    let len = byte_writer.position();
+    let osstr = OsStr::from_bytes(&bytes[..len as usize]);
     Cow::Borrowed(Path::new(osstr))
 }
 pub unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_int) -> off64_t {
