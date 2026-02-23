@@ -114,7 +114,7 @@ pub unsafe fn seek64(aasset: *mut AAsset, off: off64_t, whence: libc::c_int) -> 
     let Some(file) = wanted_assets.get_mut(&AAssetPtr(aasset)) else {
         return ndk_sys::AAsset_seek64(aasset, off, whence);
     };
-    seek_facade(off, whence, file) as off64_t
+    seek_facade(off as i64, whence, file) as off64_t
 }
 
 pub unsafe fn seek(aasset: *mut AAsset, off: off_t, whence: libc::c_int) -> off_t {
@@ -124,7 +124,7 @@ pub unsafe fn seek(aasset: *mut AAsset, off: off_t, whence: libc::c_int) -> off_
     };
     // This code can be very deadly on large files,
     // But Minecraft does not use this so we are safe 😆😆
-    seek_facade(off, whence, file) as off_t
+    seek_facade(off as i64, whence, file) as off_t
 }
 
 pub unsafe fn read(
