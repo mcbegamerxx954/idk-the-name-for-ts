@@ -1,6 +1,6 @@
 #[cfg(feature = "jni")]
 mod jniopts;
-use std::{path::Path, sync::LockResult};
+use std::{borrow::Cow, io::Write, os::unix::ffi::OsStrExt, path::Path, sync::LockResult};
 mod aasset;
 #[cfg(feature = "autofixing")]
 mod autofixer;
@@ -126,4 +126,27 @@ impl<T> InspectNone for Option<T> {
             closure();
         }
     }
+}
+/// Join paths without allocating if possible, or
+/// if the joined path does not fit the buffer then just
+/// allocate instead
+pub fn opt_path_join<'a, P>(bytes: &'a mut [u8; 128], paths: &[&P]) -> Cow<'a, Path>
+where
+    P: AsRef<Path> + ?Sized,
+{
+    let total_len: usize = paths.iter().map(|p| p.as_ref().as_os_str().len()).sum();
+    if total_len > bytes.len() {
+        let pathbuf = paths.iter().collect();
+        return Cow::Owned(pathbuf);
+    }
+    let mut byte_writer = std::io::Cursor::new(bytes.as_mut_slice());
+    for path in paths.into_iter().map(|p| p.as_ref()) {
+        let os_str_bytes = path.as_os_str().as_bytes();
+        if let Err(_err) = byte_writer.write(os_str_bytes) {
+            return Cow::Owned(paths.iter().collect());
+        };
+    }
+    let len = byte_writer.position();
+    let osstr = std::ffi::OsStr::from_bytes(&bytes[..len as usize]);
+    Cow::Borrowed(std::path::Path::new(osstr))
 }

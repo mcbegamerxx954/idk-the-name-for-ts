@@ -15,11 +15,12 @@ pub fn setup_json_watcher(path: PathBuf) {
     let current_location = get_storage_location(&options_path).unwrap_or(StorageLocation::Internal);
     let path = get_storage_path(current_location);
     let mut data_manager = setup_dataman(&path);
+    let resource_packs_dir = &mut data_manager.active_packs_path;
     // TODO: Rewrite this shit
-    if !data_manager.active_packs_path.exists() {
-        data_manager.active_packs_path =
-            setup_dataman(&get_storage_path(StorageLocation::Internal)).active_packs_path;
-        if !data_manager.active_packs_path.exists() {
+    if !resource_packs_dir.exists() {
+        let default_path = get_storage_path(StorageLocation::Internal);
+        *resource_packs_dir = setup_dataman(&default_path).active_packs_path;
+        if !resource_packs_dir.exists() {
             log::info!("no active_packs file found, using internal and hoping for the best");
         }
         log::info!("global packs json not found, defaulting to internal storage");
@@ -80,13 +81,9 @@ pub fn setup_json_watcher(path: PathBuf) {
 }
 fn update_global_sp(dataman: &mut DataManager) -> Result<(), DataError> {
     let time = Instant::now();
-
     let mut locked_sp = SHADER_PATHS.lock().ignore_poison();
-    let data = dataman.shader_paths()?;
-    // drop(dataman);
-    //
-
-    *locked_sp = data;
+    locked_sp.clear();
+    dataman.shader_paths(&mut locked_sp)?;
     log::info!(
         "Updated global shader paths in {}ms...",
         time.elapsed().as_millis()

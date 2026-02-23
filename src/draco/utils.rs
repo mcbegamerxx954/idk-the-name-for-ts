@@ -1,3 +1,5 @@
+use crate::opt_path_join;
+
 use super::errors::{DataError, PackParseError};
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -55,6 +57,7 @@ impl ValidPack {
         json.end_object()?;
         let uuid = uuid.ok_or(PackParseError::InvalidManifest("uuid"))?;
         let version = version.ok_or(PackParseError::InvalidManifest("version"))?;
+        // We assume that this had a "manifest.json" component, so we pop it to have it as a regular path
         pack_path.pop();
         Ok(Self {
             uuid,
@@ -65,9 +68,9 @@ impl ValidPack {
     pub fn get_pack_files(&self, subpack: Option<String>, set: &mut HashSet<ResourcePath>) {
         // We add the subpack first as it has priority over main pack
         if let Some(subpack) = subpack {
-            let mut path = self.path.to_path_buf();
-            path.extend(["subpacks", &subpack]);
-            get_files(&path, set);
+            let mut buffer = [0_u8; 128];
+            let joined = opt_path_join(&mut buffer, &["/subpacks/", &subpack]);
+            get_files(&joined, set);
         }
         // Any files that the subpack has will override these
         get_files(&self.path, set);
@@ -77,12 +80,17 @@ impl ValidPack {
 fn get_files(path: &Path, file_list: &mut HashSet<ResourcePath>) {
     let walker = walkdir::WalkDir::new(path);
     let iter = walker.into_iter().filter_entry(is_interesting).flatten();
-    for file_path in iter.map(|e| e.into_path()) {
-        let Some(resource_path) = ResourcePath::new(file_path, path) else {
-            continue;
-        };
-        file_list.insert(resource_path);
-    }
+    file_list.extend(
+        iter.map(|e| e.into_path())
+            .map(|e| ResourcePath::new(e, path))
+            .flatten(),
+    );
+    // for file_path in iter.map(|e| e.into_path()) {
+    //     let Some(resource_path) = ResourcePath::new(file_path, path) else {
+    //         continue;
+    //     };
+    //     file_list.insert(resource_path);
+    // }
 }
 
 fn is_interesting(entry: &DirEntry) -> bool {
@@ -148,21 +156,21 @@ impl DataManager {
     }
 
     // Get a list of shader paths
-    pub fn shader_paths<'a>(&self) -> Result<HashSet<ResourcePath<'a>>, DataError> {
+    pub fn shader_paths<'a>(&self, list: &mut HashSet<ResourcePath>) -> Result<(), DataError> {
         let global_packs: Vec<GlobalPack> = GlobalPack::parse(&self.active_packs_path)?;
         log::debug!("global_packs parsed: {:#?}", global_packs);
         let packs = self.get_installed_packs()?;
         log::debug!("Installed packs: {packs:#?}");
-        let mut final_paths = HashSet::new();
+        // let mut final_paths = HashSet::new();
         // Explanation: we use .rev to reverse the iterator since this way we can avoid
         // some checks
         for pack in global_packs.into_iter().rev() {
             if let Some(vp) = packs.iter().find(|vp| matches_pack(&pack, vp)) {
                 // We pass the hashset directly to avoid useless allocations that get dropped instantly
-                vp.get_pack_files(pack.subpack, &mut final_paths);
+                vp.get_pack_files(pack.subpack, list);
             }
         }
-        Ok(final_paths)
+        Ok(())
     }
     fn get_installed_packs(&self) -> Result<Vec<ValidPack>, DataError> {
         let pack_dirs = std::fs::read_dir(&self.resourcepacks_dir)?;
@@ -202,6 +210,7 @@ fn find_pack_manifest(path: &Path) -> Option<PathBuf> {
         .map(|e| e.into_path())
 }
 fn compare(entry1: &DirEntry, entry2: &DirEntry) -> Ordering {
+    //    entry1.into_path()
     let ftype1 = entry1.file_type();
     let ftype2 = entry2.file_type();
     match (ftype1.is_file(), ftype2.is_file()) {
