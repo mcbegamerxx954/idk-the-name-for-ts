@@ -6,11 +6,10 @@ use crate::{opt_path_join, BackendFn, LockResultExt};
 use libc::{off64_t, off_t};
 use ndk_sys::{AAsset, AAssetManager};
 use std::{
-    borrow::Cow,
     collections::HashMap,
     ffi::{CStr, OsStr},
     fs::File,
-    io::{self, Cursor, Read, Seek, Write},
+    io::{self, Cursor, Read, Seek},
     os::unix::ffi::OsStrExt,
     path::Path,
     sync::{LazyLock, Mutex, OnceLock},

@@ -1,14 +1,9 @@
-use crate::opt_path_join;
-
 use super::errors::{DataError, PackParseError};
-use std::borrow::Cow;
+use crate::draco::resource::Resource;
+use crate::opt_path_join;
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::fs::File;
-use std::hash::Hash;
-use std::ops::Range;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use struson::json_path;
 use struson::reader::{JsonReader, JsonStreamReader, ReaderSettings};
@@ -65,7 +60,7 @@ impl ValidPack {
             version,
         })
     }
-    pub fn get_pack_files(&self, subpack: Option<String>, set: &mut HashSet<ResourcePath>) {
+    pub fn get_pack_files(&self, subpack: Option<String>, set: &mut HashSet<Resource>) {
         // We add the subpack first as it has priority over main pack
         if let Some(subpack) = subpack {
             let mut buffer = [0_u8; 128];
@@ -77,20 +72,15 @@ impl ValidPack {
     }
 }
 
-fn get_files(path: &Path, file_list: &mut HashSet<ResourcePath>) {
+fn get_files(path: &Path, file_list: &mut HashSet<Resource>) {
     let walker = walkdir::WalkDir::new(path);
     let iter = walker.into_iter().filter_entry(is_interesting).flatten();
-    file_list.extend(
-        iter.map(|e| e.into_path())
-            .map(|e| ResourcePath::new(e, path))
-            .flatten(),
-    );
-    // for file_path in iter.map(|e| e.into_path()) {
-    //     let Some(resource_path) = ResourcePath::new(file_path, path) else {
-    //         continue;
-    //     };
-    //     file_list.insert(resource_path);
-    // }
+    for file_path in iter.map(|e| e.into_path()) {
+        let Some(resource_path) = Resource::new(file_path, path) else {
+            continue;
+        };
+        file_list.insert(resource_path);
+    }
 }
 
 fn is_interesting(entry: &DirEntry) -> bool {
@@ -156,7 +146,7 @@ impl DataManager {
     }
 
     // Get a list of shader paths
-    pub fn shader_paths<'a>(&self, list: &mut HashSet<ResourcePath>) -> Result<(), DataError> {
+    pub fn shader_paths<'a>(&self, list: &mut HashSet<Resource>) -> Result<(), DataError> {
         let global_packs: Vec<GlobalPack> = GlobalPack::parse(&self.active_packs_path)?;
         log::debug!("global_packs parsed: {:#?}", global_packs);
         let packs = self.get_installed_packs()?;
@@ -229,65 +219,4 @@ fn version_parse<T: JsonReader>(json: &mut T) -> Result<Vec<u32>, PackParseError
     }
     json.end_array()?;
     Ok(numbers)
-}
-
-pub struct ResourcePath<'a> {
-    path: Cow<'a, Path>,
-    resource_start: Range<usize>,
-}
-impl<'a> ResourcePath<'a> {
-    pub fn new_nameless(path: Cow<'a, Path>) -> Self {
-        let len = path.as_os_str().as_bytes().len();
-        Self {
-            path,
-            resource_start: 0..len,
-        }
-    }
-    pub fn new(path: PathBuf, prefix: &Path) -> Option<Self> {
-        let strip = path.strip_prefix(prefix).ok()?;
-        let bytes = path.as_os_str().as_encoded_bytes();
-        let range = range_of(bytes, strip.as_os_str().as_bytes())?;
-        Some(Self {
-            path: Cow::Owned(path),
-            resource_start: range,
-        })
-    }
-    pub fn path(&self) -> &Path {
-        self.path.as_ref()
-    }
-    pub fn resource_name(&self) -> &Path {
-        let osbytes = self.path.as_os_str().as_encoded_bytes();
-        let resource = &osbytes[self.resource_start.clone()];
-        let osstr = OsStr::from_bytes(resource);
-        Path::new(osstr)
-    }
-}
-impl<'a> Hash for ResourcePath<'a> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let osbytes = self.path.as_os_str().as_encoded_bytes();
-        let resource = &osbytes[self.resource_start.clone()];
-        resource.hash(state);
-    }
-}
-// Spoiler: This is Bullshit
-impl<'a> PartialEq for ResourcePath<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        self.resource_name() == other.resource_name()
-    }
-}
-impl<'a> Eq for ResourcePath<'a> {}
-
-fn wrapping_sub_ptr<T>(lhs: *const T, rhs: *const T) -> usize {
-    let pointee_size = std::mem::size_of::<T>();
-    (lhs as usize - rhs as usize) / pointee_size
-}
-
-pub fn range_of<T>(outer: &[T], inner: &[T]) -> Option<Range<usize>> {
-    let outer = outer.as_ptr_range();
-    let inner = inner.as_ptr_range();
-    if outer.start <= inner.start && inner.end <= outer.end {
-        Some(wrapping_sub_ptr(inner.start, outer.start)..wrapping_sub_ptr(inner.end, outer.start))
-    } else {
-        None
-    }
 }

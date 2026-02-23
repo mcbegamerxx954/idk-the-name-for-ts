@@ -1,9 +1,10 @@
 pub mod common;
 pub mod errors;
+pub mod resource;
 pub mod storage;
 pub mod utils;
 use crate::aasset::CowFile;
-use crate::draco::utils::ResourcePath;
+use crate::draco::resource::Resource;
 use crate::{BackendFn, LockResultExt};
 
 use self::storage::{parse_storage_location, StorageLocation};
@@ -115,7 +116,7 @@ unsafe fn special_hook(libname: &str) {
     is_edu_hook::hook_address(addr as *mut u8);
 }
 
-static SHADER_PATHS: LazyLock<Mutex<HashSet<ResourcePath<'static>>>> =
+static SHADER_PATHS: LazyLock<Mutex<HashSet<Resource<'static>>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
 pub fn startup() -> BackendFn {
@@ -143,7 +144,7 @@ pub fn startup() -> BackendFn {
 }
 fn draco_callback(path: &Path) -> Option<io::Result<CowFile>> {
     let sus = SHADER_PATHS.lock().ignore_poison();
-    let aah = ResourcePath::new_nameless(Cow::Borrowed(path));
+    let aah = Resource::new_nameless(Cow::Borrowed(path));
 
     let filename = sus.get(&aah)?;
     let file = match File::open(filename.path()) {
