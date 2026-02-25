@@ -11,6 +11,7 @@ atoi = { version = "2.0.0", optional = true }
 bhook = { version = "0.1.0", git = "https://github.com/mcbegamerxx954/bhook" }
 bstr = { version = "1.12.1", optional = true }
 ctor = { version = "0.6.3", default-features = false }
+cxx = { version = "1.0.128", optional = true }
 jni = {version= "0.21.1", optional = true }
 libc = "0.2.159"
 libloading = {version ="0.9", optional = true}
@@ -52,7 +53,7 @@ log_disable = ["log/release_max_level_off"]
 logging = ["dep:android_logger"]
 autofixing = ["dep:materialbin", "dep:scroll", "dep:memchr"]
 jni = ["dep:jni"]
-mbl2 = [ "dep:atoi", "dep:bstr", "dep:tinypatscan"]
+mbl2 = ["dep:cxx", "dep:atoi", "dep:bstr", "dep:tinypatscan"]
 draco = ["dep:struson", "dep:walkdir", "dep:jni", "dep:libloading", "dep:notify"]
 
 
