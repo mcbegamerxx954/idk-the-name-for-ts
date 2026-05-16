@@ -51,7 +51,7 @@ pub fn is_edu_hk(env: &mut EnvUnowned, thiz: &JObject) {
         Ok(())
     });
     paths.resolve_with::<LogContextErrorAndDefault, _>(|| {
-        format!("Seems like we had a error with getting jni paths, draco will be unable to work")
+        "Seems like we had a error with getting jni paths, draco will be unable to work".to_string()
     });
 }
 fn get_jni_path(

@@ -140,7 +140,7 @@ where
         return Cow::Owned(pathbuf);
     }
     let mut byte_writer = std::io::Cursor::new(bytes.as_mut_slice());
-    for path in paths.into_iter().map(|p| p.as_ref()) {
+    for path in paths.iter().map(|p| p.as_ref()) {
         let os_str_bytes = path.as_os_str().as_bytes();
         if let Err(_err) = byte_writer.write(os_str_bytes) {
             return Cow::Owned(paths.iter().collect());

@@ -49,7 +49,7 @@ pub unsafe fn open(
     let c_path: &Path = Path::new(os_str);
     // Extract filename
     #[cfg(feature = "autofixing")]
-    let Some(os_filename) = c_path.file_name() else {
+    let Some(_os_filename) = c_path.file_name() else {
         log::warn!("Path had no filename: {c_path:?}");
         return aasset;
     };
@@ -200,7 +200,7 @@ pub unsafe fn fd_dummy(
     out_len: *mut off_t,
 ) -> libc::c_int {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    if let None = wanted_assets.get(&AAssetPtr(aasset)) {
+    if wanted_assets.get(&AAssetPtr(aasset)).is_none() {
         ndk_sys::AAsset_openFileDescriptor(aasset, out_start, out_len)
     } else {
         log::error!("WE GOT BUSTED NOOO");
@@ -214,7 +214,7 @@ pub unsafe fn fd_dummy64(
     out_len: *mut off64_t,
 ) -> libc::c_int {
     let wanted_assets = WANTED_ASSETS.lock().ignore_poison();
-    if let None = wanted_assets.get(&AAssetPtr(aasset)) {
+    if wanted_assets.get(&AAssetPtr(aasset)).is_none() {
         ndk_sys::AAsset_openFileDescriptor64(aasset, out_start, out_len)
     } else {
         log::error!("WE GOT BUSTED NOOO");
