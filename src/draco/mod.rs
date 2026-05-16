@@ -9,17 +9,16 @@ use crate::{BackendFn, LockResultExt};
 
 use self::storage::{parse_storage_location, StorageLocation};
 use bhook::hook_fn;
-use jni::errors::Result as JniResult;
-use jni::objects::JObject;
-use jni::JNIEnv;
+use jni::errors::{LogContextErrorAndDefault, Result as JniResult};
+use jni::objects::{JObject, JString};
+use jni::strings::JNIStr;
+use jni::{jni_sig, jni_str, EnvUnowned};
 use libloading::{Library, Symbol};
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::error::Error;
 use std::fs::File;
 use std::path::Path;
-use std::sync::OnceLock;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 use std::{fs, io};
 #[derive(Debug)]
@@ -27,41 +26,44 @@ struct JniPaths {
     internal_path: String,
     external_path: String,
 }
-type IsEduFn = unsafe extern "C" fn(JNIEnv, JObject);
+type IsEduFn = unsafe extern "C" fn(EnvUnowned, JObject);
 static JNI_PATHS: OnceLock<JniPaths> = OnceLock::new();
 
 hook_fn! {
-    fn is_edu_hook(env: jni::JNIEnv, thiz: jni::objects::JObject) ->() = {
+    fn is_edu_hook(env: jni::EnvUnowned, thiz: jni::objects::JObject) ->() = {
         let mut env = env;
-        if let Err(err) =  super::is_edu_hk(&mut env, &thiz) {
-            log::error!("Getting jni paths failed, draco will not work: {err}");
-        }
+        super::is_edu_hk(&mut env, &thiz);
         call_original(env, thiz);
         self_disable();
     }
 }
-pub fn is_edu_hk(env: &mut JNIEnv, thiz: &JObject) -> Result<(), Box<dyn Error>> {
-    let external_path = get_jni_path(env, thiz, "getExternalStoragePath")?;
-    let internal_path = get_jni_path(env, thiz, "getInternalStoragePath")?;
-    let paths = JniPaths {
-        internal_path,
-        external_path,
-    };
-    JNI_PATHS
-        .set(paths)
-        .map_err(|_| "Jni paths was already set!")?;
-    Ok(())
+
+pub fn is_edu_hk(env: &mut EnvUnowned, thiz: &JObject) {
+    let paths = env.with_env(|env| -> JniResult<()> {
+        let external_path = get_jni_path(env, thiz, jni_str!("getExternalStoragePath"))?;
+        let internal_path = get_jni_path(env, thiz, jni_str!("getInternalStoragePath"))?;
+        let paths = JniPaths {
+            internal_path,
+            external_path,
+        };
+
+        JNI_PATHS.set(paths).unwrap();
+        Ok(())
+    });
+    paths.resolve_with::<LogContextErrorAndDefault, _>(|| {
+        format!("Seems like we had a error with getting jni paths, draco will be unable to work")
+    });
 }
 fn get_jni_path(
-    env: &mut jni::JNIEnv,
+    env: &mut jni::Env,
     instance: &jni::objects::JObject,
-    fn_name: &str,
+    fn_name: &JNIStr,
 ) -> JniResult<String> {
-    let jstring = env
-        .call_method(instance, fn_name, "()Ljava/lang/String;", &[])?
-        .l()?;
-    let path_str = env.get_string(jstring.as_ref().into())?;
-    Ok(path_str.to_str().unwrap().to_owned())
+    let sus = env
+        .call_method(instance, fn_name, jni_sig!("()Ljava/lang/String;"), &[])?
+        .into_object()?;
+    let sas = JString::cast_local(env, sus)?;
+    sas.try_to_string(env)
 }
 pub fn get_storage_location(options_path: &Path) -> Option<StorageLocation> {
     let int = parse_storage_location(options_path)

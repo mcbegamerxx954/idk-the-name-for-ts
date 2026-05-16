@@ -1,5 +1,5 @@
-#[cfg(feature = "autofixing")]
-use crate::autofixer::AssetManager;
+// #[cfg(feature = "autofixing")]
+// use crate::autofixer::AssetManager;
 #[cfg(feature = "mbl2")]
 use crate::mbl::StackString;
 use crate::{opt_path_join, BackendFn, LockResultExt};
@@ -58,12 +58,12 @@ pub unsafe fn open(
     let Some(backend) = BACKEND.get() else {
         return aasset;
     };
-    #[cfg(feature = "autofixing")]
-    let Some(manager_ptr) = std::ptr::NonNull::new(man) else {
-        return aasset;
-    };
-    #[cfg(feature = "autofixing")]
-    let manager = AssetManager::from_ptr(manager_ptr);
+    // #[cfg(feature = "autofixing")]
+    // let Some(manager_ptr) = std::ptr::NonNull::new(man) else {
+    //     return aasset;
+    // };
+    // #[cfg(feature = "autofixing")]
+    // let manager = AssetManager::from_ptr(manager_ptr);
     // Folder paths to replace and with what
     let replacement_list = folder_list! {
         apk: "gui/dist/hbui/" -> pack: "hbui/",
@@ -88,14 +88,14 @@ pub unsafe fn open(
                 return aasset;
             }
         };
-        #[cfg(feature = "autofixing")]
-        let buffer = if os_filename.as_encoded_bytes().ends_with(b".material.bin") {
-            let buffer = buffer.into_vec().unwrap();
-            let vec = crate::autofixer::process_material(manager, &buffer).unwrap_or(buffer);
-            CowFile::Buffer(Cursor::new(vec))
-        } else {
-            buffer
-        };
+        // #[cfg(feature = "autofixing")]
+        // let buffer = if os_filename.as_encoded_bytes().ends_with(b".material.bin") {
+        //     let buffer = buffer.into_vec().unwrap();
+        //     let vec = crate::autofixer::process_material(manager, &buffer).unwrap_or(buffer);
+        //     CowFile::Buffer(Cursor::new(vec))
+        // } else {
+        //     buffer
+        // };
         let mut wanted_lock = WANTED_ASSETS.lock().ignore_poison();
         wanted_lock.insert(AAssetPtr(aasset), buffer);
         log::info!("Loaded file {:#?}", joined_path);

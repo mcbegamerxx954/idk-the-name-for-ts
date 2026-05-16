@@ -2,8 +2,8 @@
 mod jniopts;
 use std::{borrow::Cow, io::Write, os::unix::ffi::OsStrExt, path::Path, sync::LockResult};
 mod aasset;
-#[cfg(feature = "autofixing")]
-mod autofixer;
+// #[cfg(feature = "autofixing")]
+// mod autofixer;
 #[cfg(feature = "draco")]
 mod draco;
 #[cfg(feature = "mbl2")]
@@ -26,7 +26,7 @@ compile_error!("Comeon, enable either mbl2 or draco feature, or else this projev
 compile_error!("This project does nto support the target system.");
 
 ctor::declarative::ctor! {
-    #[ctor]
+    #[ctor(unsafe)]
 fn safe_setup() {
     std::panic::set_hook(Box::new(move |panic_info| {
         log::error!("Thread crashed: {}", panic_info);
