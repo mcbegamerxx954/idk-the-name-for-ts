@@ -1,38 +1,67 @@
 use std::{
     borrow::Cow,
     ffi::OsStr,
-    hash::Hash,
+    hash::{DefaultHasher, Hash, Hasher},
+    io::{Read, Seek},
     ops::RangeFrom,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
+    sync::Arc,
 };
+
+use zip::{read::ZipFile, ZipArchive};
 
 pub struct Resource<'a> {
     path: Cow<'a, Path>,
-    resource_start: RangeFrom<usize>,
+    resource_offset: RangeFrom<usize>,
+    pack_uuid_hash: Option<Arc<String>>,
+    is_archived: bool,
 }
+
 impl<'a> Resource<'a> {
-    pub fn new_nameless(path: Cow<'a, Path>) -> Self {
+    fn new_self(
+        path: Cow<'a, Path>,
+        res_offset: Option<RangeFrom<usize>>,
+        pack_uuid_hash: Option<Arc<String>>,
+        is_archived: bool,
+    ) -> Self {
         Self {
             path,
-            resource_start: 0..,
+            resource_offset: res_offset.unwrap_or(0..),
+            pack_uuid_hash,
+            is_archived,
         }
     }
-    pub fn new(path: PathBuf, prefix: &Path) -> Option<Self> {
+    pub fn get_uuid(&self) -> Option<Arc<String>> {
+        self.pack_uuid_hash.clone()
+    }
+    pub fn new_zip_resource(path: Cow<'a, Path>, uuid: Arc<String>) -> Self {
+        Self::new_self(path, None, Some(uuid), true)
+    }
+    pub fn new_nameless(path: Cow<'a, Path>) -> Self {
+        Self::new_self(path, None, None, false)
+    }
+    pub fn new(path: PathBuf, prefix: &Path, uuid: Arc<String>) -> Option<Self> {
         let strip = path.strip_prefix(prefix).ok()?;
         let bytes = path.as_os_str().as_encoded_bytes();
         let range = range_start_of(bytes, strip.as_os_str().as_bytes())?;
-        Some(Self {
-            path: Cow::Owned(path),
-            resource_start: range,
-        })
+        Some(Self::new_self(
+            Cow::Owned(path),
+            Some(range),
+            Some(uuid),
+            false,
+        ))
     }
-    pub fn path(&self) -> &Path {
-        self.path.as_ref()
+    /// Will return None if the resource isnt actually a file
+    pub fn path(&self) -> Option<&Path> {
+        if self.is_archived {
+            return None;
+        }
+        Some(self.path.as_ref())
     }
     pub fn resource_name(&self) -> &Path {
         let osbytes = self.path.as_os_str().as_bytes();
-        let resource = &osbytes[self.resource_start.clone()];
+        let resource = &osbytes[self.resource_offset.clone()];
         let osstr = OsStr::from_bytes(resource);
         Path::new(osstr)
     }
@@ -40,7 +69,7 @@ impl<'a> Resource<'a> {
 impl<'a> Hash for Resource<'a> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let osbytes = self.path.as_os_str().as_encoded_bytes();
-        let resource = &osbytes[self.resource_start.clone()];
+        let resource = &osbytes[self.resource_offset.clone()];
         resource.hash(state);
     }
 }
@@ -64,5 +93,50 @@ pub fn range_start_of<T>(outer: &[T], inner: &[T]) -> Option<RangeFrom<usize>> {
         Some(wrapping_sub_ptr(inner.start, outer.start)..)
     } else {
         None
+    }
+}
+#[derive(Debug)]
+struct McPackArchive<T: Read + Seek> {
+    uuid: String,
+    archive: ZipArchive<T>,
+}
+#[derive(Debug)]
+pub struct ZipsContainer<T: Read + Seek> {
+    zips: Vec<McPackArchive<T>>,
+}
+impl<T: Read + Seek> ZipsContainer<T> {
+    pub fn add_new(&mut self, archive: ZipArchive<T>, uuid: String) {
+        let named = McPackArchive { uuid, archive };
+        self.zips.push(named);
+    }
+    pub fn get_zip(&mut self, name: Arc<String>) -> Option<&mut ZipArchive<T>> {
+        self.zips
+            .iter_mut()
+            .find(|el| el.uuid == *name)
+            .map(|u| &mut u.archive)
+    }
+    pub fn resolve_resource(&mut self, resource: Resource) -> Option<ZipFile<T>> {
+        let zip = self.get_zip(resource.pack_uuid_hash.clone()?)?;
+        Some(zip.by_name(resource.path.as_os_str().to_str()?).ok()?)
+    }
+    fn clear(&mut self) {
+        self.zips.clear();
+    }
+}
+fn get_exposed_hash<T: Hash + ?Sized>(val: &T) -> u64 {
+    let mut state = DefaultHasher::new();
+    val.hash(&mut state);
+    state.finish()
+}
+#[derive(Clone, Copy)]
+pub struct UuidHash(u64);
+impl UuidHash {
+    fn from_name(uuid: &str) -> Self {
+        Self(get_exposed_hash(uuid))
+    }
+}
+impl<T: Read + Seek> Hash for McPackArchive<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.uuid.hash(state);
     }
 }

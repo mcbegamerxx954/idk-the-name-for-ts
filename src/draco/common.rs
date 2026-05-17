@@ -8,7 +8,9 @@ use super::{get_storage_location, get_storage_path};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+pub static mut DATA_MANAGER: Mutex<DataManager> = Mutex::new(DataManager::empty());
 pub static SHOULD_STOP: AtomicBool = AtomicBool::new(false);
 pub fn setup_json_watcher(path: PathBuf) {
     let options_path = path.join("options.txt");
@@ -25,6 +27,11 @@ pub fn setup_json_watcher(path: PathBuf) {
         }
         log::info!("global packs json not found, defaulting to internal storage");
     }
+    unsafe {
+        *DATA_MANAGER.lock().ignore_poison() = data_manager;
+    }
+
+    let mut data_manager = unsafe { DATA_MANAGER.lock().ignore_poison() };
     startup_load(&mut data_manager);
     let (sender, reciever) = std::sync::mpsc::channel();
     let mut watcher = RecommendedWatcher::new(sender, Config::default()).unwrap();
@@ -38,6 +45,7 @@ pub fn setup_json_watcher(path: PathBuf) {
     watcher
         .watch(&data_manager.active_packs_path, RecursiveMode::NonRecursive)
         .unwrap();
+    drop(data_manager);
     for event in reciever {
         let should_stop = SHOULD_STOP.load(Ordering::Acquire);
         if should_stop {
@@ -63,16 +71,20 @@ pub fn setup_json_watcher(path: PathBuf) {
             continue;
         };
 
-        if &data_manager.active_packs_path != path {
-            log::warn!("Wrong path detected, correcting..");
-            let new_dataman =
-                DataManager::init_data(path.clone(), data_manager.resourcepacks_dir.clone());
-            data_manager = new_dataman;
-        }
+        // if &data_manager.active_packs_path != path {
+        //     log::warn!("Wrong path detected, correcting..");
+
+        //     let mut data_manager = DATA_MANAGER.get_mut().ignore_poison();
+
+        //     let new_dataman =
+        //         DataManager::init_data(path.clone(), data_manager.resourcepacks_dir.clone());
+        //     *data_manager = new_dataman;
+        // }
         // This means that Minecraft has changed or read the resource list, let's do it too
         if file_name == "global_resource_packs.json" && event.kind.is_modify() {
             log::info!("Active rpacks changed, updating..");
 
+            let mut data_manager = unsafe { DATA_MANAGER.get_mut().ignore_poison() };
             if let Err(e) = update_global_sp(&mut data_manager) {
                 log::warn!("Updating shader paths failed: {e}");
             };

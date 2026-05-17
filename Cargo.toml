@@ -27,6 +27,7 @@ scroll = {version = "0.13.0", optional = true}
 struson = { version = "0.7.2", optional = true, features = ["simple-api"] }
 tinypatscan = { git = "https://github.com/mcbegamerxx954/tinypatscan", version = "0.1.1", optional = true }
 walkdir = { version = "2.5.0", optional = true }
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # [profile.release]
 # This lib gets called from nowhere and so unwinding = crash

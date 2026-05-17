@@ -1,10 +1,15 @@
 use super::errors::{DataError, PackParseError};
-use crate::draco::resource::Resource;
+use crate::draco::resource::{Resource, ZipsContainer};
 use crate::opt_path_join;
+use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fs::File;
+use std::hash::DefaultHasher;
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use struson::json_path;
 use struson::reader::{JsonReader, JsonStreamReader, ReaderSettings};
 const JSON_SETTINGS: ReaderSettings = ReaderSettings {
@@ -17,27 +22,38 @@ const JSON_SETTINGS: ReaderSettings = ReaderSettings {
 };
 // use tinyjson::{JsonParseError, JsonParser, JsonValue};
 use walkdir::DirEntry;
+use zip::read::ZipFile;
+use zip::ZipArchive;
 // Keeps track and manages data about the minecraft Resource Pack Structure
 #[derive(Debug)]
 pub struct DataManager {
+    valid_packs: Vec<ValidPack>,
+    active_packs: Vec<GlobalPack>,
     pub resourcepacks_dir: PathBuf,
     pub active_packs_path: PathBuf,
 }
-
+enum PackType {
+    Uncompressed(PathBuf),
+    Compressed(PathBuf, ZipArchive<File>),
+}
 // A pack that minecraft verified as valid
 #[derive(Debug)]
 pub struct ValidPack {
     uuid: String,
     path: PathBuf,
     version: Vec<u32>,
+    zip: Option<ZipArchive<File>>,
 }
 
 impl ValidPack {
     // We do not use serde because it is much more strict
     // than bedrock in terms of json parsing
-    fn parse_manifest(mut pack_path: PathBuf) -> Result<Self, PackParseError> {
-        let manifest = File::open(&pack_path)?;
-        let mut json = JsonStreamReader::new_custom(manifest, JSON_SETTINGS);
+    fn parse_manifest<T: Read>(
+        manifest_reader: &mut T,
+        mut pack_path: PathBuf,
+    ) -> Result<Self, PackParseError> {
+        // let manifest = File::open(&pack_path)?;
+        let mut json = JsonStreamReader::new_custom(manifest_reader, JSON_SETTINGS);
         json.seek_to(&json_path!["header"])?;
         json.begin_object()?;
         let mut uuid = None;
@@ -58,31 +74,80 @@ impl ValidPack {
             uuid,
             path: pack_path,
             version,
+            zip: None,
         })
     }
-    pub fn get_pack_files(&self, subpack: Option<String>, set: &mut HashSet<Resource>) {
+    fn set_zip(&mut self, zip: ZipArchive<File>) {
+        self.zip = Some(zip);
+    }
+    fn handle_zip_resource(&mut self, resource: &Resource) -> Option<Vec<u8>> {
+        let sus = resource.resource_name();
+        let mut file = self.zip.as_mut()?.by_path(sus).ok()?;
+        let mut buf = Vec::with_capacity(file.size() as usize);
+        file.read_to_end(&mut buf).ok()?;
+        Some(buf)
+    }
+
+    fn impl_get_files(&self, path: &Path, set: &mut HashSet<Resource>, uuid: Arc<String>) {
+        match self.zip {
+            Some(ref zip) => get_files_archive(zip, set, uuid),
+            None => get_files(path, set, uuid),
+        }
+    }
+    pub fn get_pack_files(&self, subpack: Option<&str>, set: &mut HashSet<Resource>) {
+        let uuid_tag = Arc::new(self.uuid.clone());
         // We add the subpack first as it has priority over main pack
         if let Some(subpack) = subpack {
             let mut buffer = [0_u8; 128];
             let joined = opt_path_join(&mut buffer, &["/subpacks/", &subpack]);
-            get_files(&joined, set);
+            self.impl_get_files(&joined, set, uuid_tag.clone());
         }
         // Any files that the subpack has will override these
-        get_files(&self.path, set);
+        self.impl_get_files(&self.path, set, uuid_tag);
     }
 }
 
-fn get_files(path: &Path, file_list: &mut HashSet<Resource>) {
+fn get_files(path: &Path, file_list: &mut HashSet<Resource>, uuid: Arc<String>) {
     let walker = walkdir::WalkDir::new(path);
     let iter = walker.into_iter().filter_entry(is_interesting).flatten();
     for file_path in iter.map(|e| e.into_path()) {
-        let Some(resource_path) = Resource::new(file_path, path) else {
+        let Some(resource_path) = Resource::new(file_path, path, uuid.clone()) else {
             continue;
         };
         file_list.insert(resource_path);
     }
 }
 
+fn get_files_archive<T: Read + Seek>(
+    zip: &ZipArchive<T>,
+    // subpack: Option<String>,
+    set: &mut HashSet<Resource>,
+    uuid: Arc<String>,
+) {
+    const ALLOWED_PATHS: [&str; 4] = ["renderer", "vanilla_cameras", "hbui", "custom_persona"];
+    let check_path = |e: &Path| ALLOWED_PATHS.into_iter().any(|a| e.starts_with(a));
+    for name in zip.file_names() {
+        let path = Path::new(OsStr::new(name));
+        if check_path(path) {
+            let resource = Resource::new_zip_resource(Cow::Owned(path.to_path_buf()), uuid.clone());
+            set.insert(resource);
+        }
+        // let path = Path::new(OsStr::new(name));
+        // let mut components = path.iter();
+        // let root = components.next().unwrap();
+        // if let Some(ref subpack) = subpack {
+        //     if root == subpack.as_str() && check_path(components.as_path()) {
+        //         let final_path = components.as_path().to_path_buf();
+        //         let resource = Resource::new_zip_resource(final_path.into(), uuid.clone());
+        //         set.insert(resource);
+        //     }
+        // }
+        // if check_path(path) {
+        //     let resource = Resource::new_zip_resource(Cow::Owned(path.to_owned()), uuid.clone());
+        //     set.insert(resource);
+        // }
+    }
+}
 fn is_interesting(entry: &DirEntry) -> bool {
     const ALLOWED_PATHS: [&str; 4] = ["renderer", "vanilla_cameras", "hbui", "custom_persona"];
     if entry.depth() == 1 {
@@ -137,16 +202,22 @@ impl GlobalPack {
 }
 
 impl DataManager {
+    /// Made solely for my convenience, generates a very useless dataman
+    pub const fn empty() -> Self {
+        Self::init_data(PathBuf::new(), PathBuf::new())
+    }
     // Get minecraft paths and create itself
     pub const fn init_data(json_path: PathBuf, resourcepacks_path: PathBuf) -> Self {
         Self {
+            active_packs: Vec::new(),
+            valid_packs: Vec::new(),
             resourcepacks_dir: resourcepacks_path,
             active_packs_path: json_path,
         }
     }
 
     // Get a list of shader paths
-    pub fn shader_paths<'a>(&self, list: &mut HashSet<Resource>) -> Result<(), DataError> {
+    pub fn shader_paths<'a>(&mut self, list: &mut HashSet<Resource>) -> Result<(), DataError> {
         let global_packs: Vec<GlobalPack> = GlobalPack::parse(&self.active_packs_path)?;
         log::debug!("global_packs parsed: {:#?}", global_packs);
         let packs = self.get_installed_packs()?;
@@ -154,26 +225,60 @@ impl DataManager {
         // let mut final_paths = HashSet::new();
         // Explanation: we use .rev to reverse the iterator since this way we can avoid
         // some checks
-        for pack in global_packs.into_iter().rev() {
+        for pack in global_packs.iter().rev() {
             if let Some(vp) = packs.iter().find(|vp| matches_pack(&pack, vp)) {
                 // We pass the hashset directly to avoid useless allocations that get dropped instantly
-                vp.get_pack_files(pack.subpack, list);
+                vp.get_pack_files(pack.subpack.as_deref(), list);
             }
         }
+        self.valid_packs = packs;
+        self.active_packs = global_packs;
         Ok(())
+    }
+    pub fn read_resource(&mut self, resource: &Resource) -> Option<Vec<u8>> {
+        let resource_uuid = resource.get_uuid()?;
+        let pack = self
+            .valid_packs
+            .iter_mut()
+            .find(|e| e.uuid == *resource_uuid)?;
+        pack.handle_zip_resource(resource)
     }
     fn get_installed_packs(&self) -> Result<Vec<ValidPack>, DataError> {
         let pack_dirs = std::fs::read_dir(&self.resourcepacks_dir)?;
         let mut packs = Vec::new();
         for dir in pack_dirs.flatten() {
+            let path = dir.path();
+            if path.extension().is_some_and(|a| a == "mcpack") {
+                let zipfile = File::open(&path).unwrap();
+                let mut zip = ZipArchive::new(zipfile).unwrap();
+                let mut manifest = zip.by_name("manifest.json").unwrap();
+                let mut validpack = match ValidPack::parse_manifest(&mut manifest, path) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        log::warn!("FUck");
+                        continue;
+                    }
+                };
+                drop(manifest);
+                validpack.set_zip(zip);
+                packs.push(validpack);
+                continue;
+            }
             if !dir.file_type()?.is_dir() {
                 continue;
             }
-            let Some(manifest_path) = find_pack_manifest(&dir.path()) else {
-                log::warn!("Cannot find pack manifest for dir: {:?}", dir.path());
+            let Some(manifest_path) = find_pack_manifest(&path) else {
+                log::warn!("Cannot find pack manifest for dir: {:?}", path);
                 continue;
             };
-            let validpack = match ValidPack::parse_manifest(manifest_path) {
+            let mut fileyay = match File::open(&manifest_path) {
+                Ok(yay) => yay,
+                Err(e) => {
+                    log::warn!("couldnt open manifest file");
+                    continue;
+                }
+            };
+            let validpack = match ValidPack::parse_manifest(&mut fileyay, manifest_path) {
                 Ok(pack) => pack,
                 Err(err) => {
                     log::error!("Pack manifest parse failed: {err}");

@@ -4,6 +4,7 @@ pub mod resource;
 pub mod storage;
 pub mod utils;
 use crate::aasset::CowFile;
+use crate::draco::common::DATA_MANAGER;
 use crate::draco::resource::Resource;
 use crate::{BackendFn, LockResultExt};
 
@@ -17,6 +18,8 @@ use libloading::{Library, Symbol};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fs::File;
+use std::io::Cursor;
+use std::ops::Deref;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::Duration;
@@ -148,8 +151,17 @@ fn draco_callback(path: &Path) -> Option<io::Result<CowFile>> {
     let sus = SHADER_PATHS.lock().ignore_poison();
     let aah = Resource::new_nameless(Cow::Borrowed(path));
 
-    let filename = sus.get(&aah)?;
-    let file = match File::open(filename.path()) {
+    let resource = sus.get(&aah)?;
+    let path = match resource.path() {
+        Some(yay) => yay,
+        None => {
+            let mut data_manager = unsafe { DATA_MANAGER.lock().ignore_poison() };
+            let deeta = data_manager.read_resource(resource)?;
+            let deeta_cur = Cursor::new(deeta);
+            return Some(Ok(CowFile::Buffer(deeta_cur)));
+        }
+    };
+    let file = match File::open(path) {
         Ok(yay) => yay,
         Err(e) => return Some(Err(e)),
     };
