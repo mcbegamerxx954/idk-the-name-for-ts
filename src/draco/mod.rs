@@ -19,7 +19,6 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Cursor;
-use std::ops::Deref;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::Duration;

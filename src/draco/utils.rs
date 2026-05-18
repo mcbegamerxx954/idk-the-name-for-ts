@@ -1,13 +1,12 @@
 use super::errors::{DataError, PackParseError};
-use crate::draco::resource::{Resource, ZipsContainer};
+use crate::draco::resource::Resource;
 use crate::opt_path_join;
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::hash::DefaultHasher;
-use std::io::{self, Read, Seek, Write};
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use struson::json_path;
@@ -22,7 +21,6 @@ const JSON_SETTINGS: ReaderSettings = ReaderSettings {
 };
 // use tinyjson::{JsonParseError, JsonParser, JsonValue};
 use walkdir::DirEntry;
-use zip::read::ZipFile;
 use zip::ZipArchive;
 // Keeps track and manages data about the minecraft Resource Pack Structure
 #[derive(Debug)]
@@ -132,20 +130,6 @@ fn get_files_archive<T: Read + Seek>(
             let resource = Resource::new_zip_resource(Cow::Owned(path.to_path_buf()), uuid.clone());
             set.insert(resource);
         }
-        // let path = Path::new(OsStr::new(name));
-        // let mut components = path.iter();
-        // let root = components.next().unwrap();
-        // if let Some(ref subpack) = subpack {
-        //     if root == subpack.as_str() && check_path(components.as_path()) {
-        //         let final_path = components.as_path().to_path_buf();
-        //         let resource = Resource::new_zip_resource(final_path.into(), uuid.clone());
-        //         set.insert(resource);
-        //     }
-        // }
-        // if check_path(path) {
-        //     let resource = Resource::new_zip_resource(Cow::Owned(path.to_owned()), uuid.clone());
-        //     set.insert(resource);
-        // }
     }
 }
 fn is_interesting(entry: &DirEntry) -> bool {
@@ -222,7 +206,7 @@ impl DataManager {
         log::debug!("global_packs parsed: {:#?}", global_packs);
         let packs = self.get_installed_packs()?;
         log::debug!("Installed packs: {packs:#?}");
-        // let mut final_paths = HashSet::new();
+
         // Explanation: we use .rev to reverse the iterator since this way we can avoid
         // some checks
         for pack in global_packs.iter().rev() {
@@ -254,7 +238,7 @@ impl DataManager {
                 let mut manifest = zip.by_name("manifest.json").unwrap();
                 let mut validpack = match ValidPack::parse_manifest(&mut manifest, path) {
                     Ok(path) => path,
-                    Err(e) => {
+                    Err(_e) => {
                         log::warn!("FUck");
                         continue;
                     }
@@ -273,7 +257,7 @@ impl DataManager {
             };
             let mut fileyay = match File::open(&manifest_path) {
                 Ok(yay) => yay,
-                Err(e) => {
+                Err(_e) => {
                     log::warn!("couldnt open manifest file");
                     continue;
                 }

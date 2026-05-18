@@ -8,7 +8,7 @@ use super::{get_storage_location, get_storage_path};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 pub static mut DATA_MANAGER: Mutex<DataManager> = Mutex::new(DataManager::empty());
 pub static SHOULD_STOP: AtomicBool = AtomicBool::new(false);
