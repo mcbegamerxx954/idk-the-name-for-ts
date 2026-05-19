@@ -8,7 +8,6 @@ use std::{
     sync::Arc,
 };
 
-
 pub struct Resource<'a> {
     path: Cow<'a, Path>,
     resource_offset: RangeFrom<usize>,
@@ -33,8 +32,10 @@ impl<'a> Resource<'a> {
     pub fn get_uuid(&self) -> Option<Arc<String>> {
         self.pack_uuid_hash.clone()
     }
-    pub fn new_zip_resource(path: Cow<'a, Path>, uuid: Arc<String>) -> Self {
-        Self::new_self(path, None, Some(uuid), true)
+    pub fn new_zip_resource(path: PathBuf, prefix: &Path, uuid: Arc<String>) -> Option<Self> {
+        let mut selfs = Self::new(path, prefix, uuid)?;
+        selfs.is_archived = true;
+        Some(selfs)
     }
     pub fn new_nameless(path: Cow<'a, Path>) -> Self {
         Self::new_self(path, None, None, false)
@@ -51,17 +52,17 @@ impl<'a> Resource<'a> {
         ))
     }
     /// Will return None if the resource isnt actually a file
-    pub fn path(&self) -> Option<&Path> {
-        if self.is_archived {
-            return None;
-        }
-        Some(self.path.as_ref())
+    pub fn path(&self) -> &Path {
+        self.path.as_ref()
     }
     pub fn resource_name(&self) -> &Path {
         let osbytes = self.path.as_os_str().as_bytes();
         let resource = &osbytes[self.resource_offset.clone()];
         let osstr = OsStr::from_bytes(resource);
         Path::new(osstr)
+    }
+    pub fn is_archived(&self) -> bool {
+        self.is_archived
     }
 }
 impl<'a> Hash for Resource<'a> {

@@ -41,6 +41,7 @@ pub struct ValidPack {
     path: PathBuf,
     version: Vec<u32>,
     zip: Option<ZipArchive<File>>,
+    actual_prefix: Option<PathBuf>,
 }
 
 impl ValidPack {
@@ -73,13 +74,14 @@ impl ValidPack {
             path: pack_path,
             version,
             zip: None,
+            actual_prefix: None,
         })
     }
     fn set_zip(&mut self, zip: ZipArchive<File>) {
         self.zip = Some(zip);
     }
     fn handle_zip_resource(&mut self, resource: &Resource) -> Option<Vec<u8>> {
-        let sus = resource.resource_name();
+        let sus = resource.path();
         let mut file = self.zip.as_mut()?.by_path(sus).ok()?;
         let mut buf = Vec::with_capacity(file.size() as usize);
         file.read_to_end(&mut buf).ok()?;
@@ -88,7 +90,9 @@ impl ValidPack {
 
     fn impl_get_files(&self, path: &Path, set: &mut HashSet<Resource>, uuid: Arc<String>) {
         match self.zip {
-            Some(ref zip) => get_files_archive(zip, set, uuid),
+            Some(ref zip) => {
+                get_files_archive(self.actual_prefix.as_deref().unwrap(), zip, set, uuid)
+            }
             None => get_files(path, set, uuid),
         }
     }
@@ -115,20 +119,25 @@ fn get_files(path: &Path, file_list: &mut HashSet<Resource>, uuid: Arc<String>) 
         file_list.insert(resource_path);
     }
 }
-
+fn find_archive_root<'a, T: Read + Seek>(zip: &'a ZipArchive<T>) -> Option<&'a str> {
+    zip.file_names().find(|e| e.ends_with("manifest.json"))
+}
 fn get_files_archive<T: Read + Seek>(
+    prefix: &Path,
     zip: &ZipArchive<T>,
     // subpack: Option<String>,
     set: &mut HashSet<Resource>,
     uuid: Arc<String>,
 ) {
     const ALLOWED_PATHS: [&str; 4] = ["renderer", "vanilla_cameras", "hbui", "custom_persona"];
+
     let check_path = |e: &Path| ALLOWED_PATHS.into_iter().any(|a| e.starts_with(a));
     for name in zip.file_names() {
         let path = Path::new(OsStr::new(name));
-        if check_path(path) {
-            let resource = Resource::new_zip_resource(Cow::Owned(path.to_path_buf()), uuid.clone());
-            set.insert(resource);
+        let path_strip = path.strip_prefix(prefix).unwrap();
+        if check_path(path_strip) {
+            let resource = Resource::new_zip_resource(path.to_path_buf(), prefix, uuid.clone());
+            set.insert(resource.unwrap());
         }
     }
 }
@@ -235,7 +244,12 @@ impl DataManager {
             if path.extension().is_some_and(|a| a == "mcpack") {
                 let zipfile = File::open(&path).unwrap();
                 let mut zip = ZipArchive::new(zipfile).unwrap();
-                let mut manifest = zip.by_name("manifest.json").unwrap();
+                let Some(manifest_path) = find_archive_root(&zip) else {
+                    log::warn!("cannot find manifest.json in zip");
+                    continue;
+                };
+                let manifest_path = manifest_path.to_string();
+                let mut manifest = zip.by_name(&manifest_path).unwrap();
                 let mut validpack = match ValidPack::parse_manifest(&mut manifest, path) {
                     Ok(path) => path,
                     Err(_e) => {
@@ -243,8 +257,11 @@ impl DataManager {
                         continue;
                     }
                 };
+                let mut actual_path = Path::new(OsStr::new(&manifest_path)).to_path_buf();
+                actual_path.pop();
                 drop(manifest);
                 validpack.set_zip(zip);
+                validpack.actual_prefix = Some(actual_path);
                 packs.push(validpack);
                 continue;
             }

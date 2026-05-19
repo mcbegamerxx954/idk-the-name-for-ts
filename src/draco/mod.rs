@@ -151,14 +151,12 @@ fn draco_callback(path: &Path) -> Option<io::Result<CowFile>> {
     let aah = Resource::new_nameless(Cow::Borrowed(path));
 
     let resource = sus.get(&aah)?;
-    let path = match resource.path() {
-        Some(yay) => yay,
-        None => {
-            let mut data_manager = unsafe { DATA_MANAGER.lock().ignore_poison() };
-            let deeta = data_manager.read_resource(resource)?;
-            let deeta_cur = Cursor::new(deeta);
-            return Some(Ok(CowFile::Buffer(deeta_cur)));
-        }
+    let path = resource.path();
+    if resource.is_archived() {
+        let mut data_manager = unsafe { DATA_MANAGER.lock().ignore_poison() };
+        let deeta = data_manager.read_resource(resource)?;
+        let deeta_cur = Cursor::new(deeta);
+        return Some(Ok(CowFile::Buffer(deeta_cur)));
     };
     let file = match File::open(path) {
         Ok(yay) => yay,
